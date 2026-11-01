@@ -1,5 +1,7 @@
 import { CONTENT_SCANNER_SCRIPT_PATH } from '@shared/constants';
 import type { MessageResult } from '@shared/messages';
+import { networkSniffer } from './network-sniffer';
+import { refererRuleManager } from './referer-rules';
 import { sessionStore } from './session-store';
 
 export async function bootstrapTabScan(
@@ -20,6 +22,7 @@ export async function bootstrapTabScan(
   const url = tab.url || '';
   const title = tab.title;
   if (!isScannableUrl(url)) {
+    void refererRuleManager.setActiveTabContext(undefined);
     sessionStore.setScanStatus(
       tabId,
       'restricted',
@@ -27,6 +30,9 @@ export async function bootstrapTabScan(
     );
     return;
   }
+
+  networkSniffer.startSniffing();
+  void refererRuleManager.setActiveTabContext(url);
 
   const existingSession = sessionStore.getSession(tabId);
   let sessionEpoch: number;
@@ -70,6 +76,7 @@ export async function triggerTabRescan(tabId: number): Promise<boolean> {
 
   const urlToCheck = currentUrl || session.pageUrl || '';
   if (!isScannableUrl(urlToCheck)) {
+    void refererRuleManager.setActiveTabContext(undefined);
     const protocolHint = urlToCheck ? `${urlToCheck.slice(0, 30)}...` : '内部ページ';
     sessionStore.setScanStatus(
       tabId,
@@ -79,6 +86,8 @@ export async function triggerTabRescan(tabId: number): Promise<boolean> {
     return false;
   }
 
+  networkSniffer.startSniffing();
+  void refererRuleManager.setActiveTabContext(urlToCheck);
   sessionStore.setScanStatus(tabId, 'scanning');
   return injectAndStartScanner(tabId, session.scanEpoch);
 }

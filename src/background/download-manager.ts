@@ -13,6 +13,7 @@ import {
 } from '@shared/filename-utils';
 import type {
   BlobDataUrlResponse,
+  HttpVideoFetchResponse,
   MessageResult,
   PanelInternalRequestMessage,
   VideoBlobPrepareResponse,
@@ -24,11 +25,20 @@ import type {
   MediaMode,
 } from '@shared/types';
 import { getActiveVideoVariant, inferVideoFormat } from '@shared/video-utils';
+import { refererRuleManager } from './referer-rules';
 import { sessionStore } from './session-store';
 
 interface QueuedDownloadRequest {
   tabId: number;
   itemId: string;
+}
+
+interface ActiveHttpVideoTransfer {
+  tabId: number;
+  itemId: string;
+  transferId: string;
+  targetUrl: string;
+  canceled: boolean;
 }
 
 const PROGRESS_POLL_INTERVAL_MS = 500;
@@ -43,6 +53,7 @@ export class DownloadManager {
   private activeImageCount = 0;
   private activeVideoCount = 0;
   private activeDownloads = new Map<number, ActiveDownloadIndexEntry>(); // downloadId -> Entry
+  private activeHttpTransfers = new Map<string, ActiveHttpVideoTransfer>(); // `${tabId}:${itemId}` -> Transfer
   private isProcessing = false;
   private progressPollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -180,7 +191,33 @@ export class DownloadManager {
       return true;
     }
 
-    // 2. Cancel active Chrome download if in progress
+    // 2. Cancel active Side Panel HTTP video stream if currently fetching
+    const transferKey = `${tabId}:${itemId}`;
+    const activeHttp = this.activeHttpTransfers.get(transferKey);
+    if (activeHttp) {
+      activeHttp.canceled = true;
+      this.activeHttpTransfers.delete(transferKey);
+      try {
+        const abortRpc: PanelInternalRequestMessage = {
+          channel: 'WIC_BG_TO_PANEL_RPC',
+          type: 'PANEL_ABORT_HTTP_VIDEO_FETCH',
+          transferId: activeHttp.transferId,
+        };
+        chrome.runtime.sendMessage(abortRpc).catch(() => {});
+      } catch {}
+
+      sessionStore.updateDownloadState(tabId, {
+        itemId,
+        targetUrl: activeHttp.targetUrl,
+        status: 'canceled',
+        errorMessage: 'キャンセルされました',
+        retryable: false,
+        updatedAt: Date.now(),
+      });
+      return true;
+    }
+
+    // 3. Cancel active Chrome download if in progress
     for (const [downloadId, entry] of this.activeDownloads.entries()) {
       if (entry.tabId === tabId && entry.itemId === itemId) {
         try {
@@ -206,6 +243,44 @@ export class DownloadManager {
     }
 
     return false;
+  }
+
+  handleHttpFetchProgress(
+    tabId: number,
+    itemId: string,
+    transferId: string,
+    bytesReceived: number,
+    totalBytes?: number,
+  ): void {
+    const activeHttp = this.activeHttpTransfers.get(`${tabId}:${itemId}`);
+    if (!activeHttp || activeHttp.transferId !== transferId || activeHttp.canceled) {
+      return;
+    }
+
+    const session = sessionStore.getSession(tabId);
+    const currentDl = session?.downloads.get(itemId);
+    if (!currentDl) return;
+
+    if (currentDl.status === 'starting') {
+      sessionStore.updateDownloadState(tabId, {
+        ...currentDl,
+        status: 'in_progress',
+        bytesReceived,
+        totalBytes: totalBytes && totalBytes > 0 ? totalBytes : currentDl.totalBytes,
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
+    if (currentDl.status === 'in_progress') {
+      sessionStore.emitDownloadProgress(tabId, [
+        {
+          itemId,
+          bytesReceived,
+          totalBytes: totalBytes && totalBytes > 0 ? totalBytes : currentDl.totalBytes,
+        },
+      ]);
+    }
   }
 
   retryFailed(tabId: number, itemIds?: string[], mediaMode?: MediaMode): void {
@@ -455,6 +530,8 @@ export class DownloadManager {
     });
 
     let downloadableUrl = targetUrl;
+    let resolvedFinalUrl: string | undefined;
+    let resolvedContentDisposition: string | undefined;
     let resolvedMimeType: string | undefined;
     let resolvedByteLength: number | undefined = variant.fileSizeBytes ?? undefined;
     let revokeObjectUrl: string | undefined;
@@ -546,6 +623,98 @@ export class DownloadManager {
         });
         return;
       }
+    } else if (targetUrl.startsWith('http:') || targetUrl.startsWith('https:')) {
+      // Stream HTTP(S) video via Side Panel with Referer/Origin DNR session rules & cookies
+      // so Referer-protected CDNs (e.g. TokyoMotion www47.*) never fail with 403 Forbidden.
+      const transferKey = `${tabId}:${itemId}`;
+      const transferId = `vhttp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const transferEntry: ActiveHttpVideoTransfer = {
+        tabId,
+        itemId,
+        transferId,
+        targetUrl,
+        canceled: false,
+      };
+      this.activeHttpTransfers.set(transferKey, transferEntry);
+      await refererRuleManager.acquireDownloadRule(transferKey, session.pageUrl, targetUrl);
+
+      try {
+        const rpcMsg: PanelInternalRequestMessage = {
+          channel: 'WIC_BG_TO_PANEL_RPC',
+          type: 'PANEL_FETCH_HTTP_VIDEO_TO_OBJECT_URL',
+          tabId,
+          itemId,
+          transferId,
+          url: targetUrl,
+          maxBytes: VIDEO_BLOB_MAX_BYTES,
+        };
+        const panelRes = (await chrome.runtime.sendMessage(rpcMsg)) as
+          | MessageResult<HttpVideoFetchResponse>
+          | undefined;
+
+        if (transferEntry.canceled) {
+          if (panelRes?.ok && panelRes.data?.mode === 'object_url') {
+            this.cleanupObjectUrlIfNeeded(panelRes.data.objectUrl);
+          }
+          return;
+        }
+
+        if (panelRes && !panelRes.ok) {
+          if (panelRes.code === 'USER_CANCELED') {
+            sessionStore.updateDownloadState(tabId, {
+              itemId,
+              targetUrl,
+              status: 'canceled',
+              errorMessage: 'キャンセルされました',
+              retryable: false,
+              updatedAt: Date.now(),
+            });
+            return;
+          }
+
+          const classified = classifyHttpFetchError(panelRes.code, panelRes.error);
+          sessionStore.updateDownloadState(tabId, {
+            itemId,
+            targetUrl,
+            status: 'failed',
+            errorCode: panelRes.code ?? 'HTTP_FETCH_ERROR',
+            errorCategory: classified.errorCategory,
+            errorMessage: classified.errorMessage,
+            retryable: classified.retryable,
+            updatedAt: Date.now(),
+          });
+          return;
+        }
+
+        if (panelRes?.ok && panelRes.data) {
+          resolvedFinalUrl = panelRes.data.finalUrl;
+          resolvedContentDisposition = panelRes.data.contentDisposition;
+          if (panelRes.data.mimeType) {
+            resolvedMimeType = panelRes.data.mimeType;
+          }
+          if (panelRes.data.totalBytes && panelRes.data.totalBytes > 0) {
+            resolvedByteLength = panelRes.data.totalBytes;
+            sessionStore.updateVideoMetadata(tabId, {
+              url: targetUrl,
+              fileSizeBytes: resolvedByteLength,
+            });
+          }
+
+          if (panelRes.data.mode === 'object_url') {
+            downloadableUrl = panelRes.data.objectUrl;
+            revokeObjectUrl = panelRes.data.objectUrl;
+          } else {
+            // > 1 GB direct fallback
+            downloadableUrl = panelRes.data.finalUrl || targetUrl;
+          }
+        }
+      } catch {
+        // Side Panel view unavailable/closed -> fall back cleanly to direct chrome.downloads
+        if (transferEntry.canceled) return;
+      } finally {
+        this.activeHttpTransfers.delete(transferKey);
+        await refererRuleManager.releaseDownloadRule(transferKey);
+      }
     }
 
     const indexMatch = /^vid_(\d+)$/.exec(itemId);
@@ -553,10 +722,12 @@ export class DownloadManager {
     const effectiveFormat =
       variant.format !== 'unknown'
         ? variant.format
-        : inferVideoFormat(targetUrl, resolvedMimeType);
+        : inferVideoFormat(resolvedFinalUrl ?? targetUrl, resolvedMimeType);
 
     const filename = buildSafeVideoDownloadFilename({
       targetUrl,
+      resolvedUrl: resolvedFinalUrl,
+      contentDisposition: resolvedContentDisposition,
       domain: session.domain,
       pageTitle: session.pageTitle ?? session.domain ?? 'videos',
       itemIndex,
@@ -619,7 +790,7 @@ export class DownloadManager {
         targetUrl,
         downloadId,
         suggestedFilename: filename,
-        bytesReceived: 0,
+        bytesReceived: revokeObjectUrl && totalBytes ? totalBytes : 0,
         totalBytes,
         status: 'in_progress',
         retryable: false,
@@ -781,6 +952,45 @@ export class DownloadManager {
       console.warn('[WIC] Failed to persist active download index:', err);
     }
   }
+}
+
+function classifyHttpFetchError(
+  code?: string,
+  rawMessage?: string,
+): {
+  errorCategory: DownloadErrorCategory;
+  errorMessage: string;
+  retryable: boolean;
+} {
+  if (code === 'HTTP_401' || code === 'HTTP_403' || code === 'HTML_RESPONSE') {
+    return {
+      errorCategory: 'auth_or_forbidden',
+      errorMessage:
+        code === 'HTML_RESPONSE'
+          ? rawMessage || '認証ページが返されたため保存できませんでした（ページを再スキャンしてください）'
+          : `アクセスが拒否されました (${rawMessage ?? code})。ページの有効期限切れ時は再スキャンをお試しください`,
+      retryable: true,
+    };
+  }
+  if (code === 'HTTP_404' || code === 'HTTP_410') {
+    return {
+      errorCategory: 'not_found',
+      errorMessage: `動画URLが見つからないか期限切れです (${rawMessage ?? code})`,
+      retryable: true,
+    };
+  }
+  if (code === 'NETWORK_FAILED' || (code && /^HTTP_5\d\d$/.test(code))) {
+    return {
+      errorCategory: 'network_transient',
+      errorMessage: `ネットワークまたはサーバー応答エラーが発生しました (${rawMessage ?? code})`,
+      retryable: true,
+    };
+  }
+  return {
+    errorCategory: 'unknown',
+    errorMessage: rawMessage || `動画データの取得に失敗しました (${code ?? 'UNKNOWN'})`,
+    retryable: true,
+  };
 }
 
 function classifyInterruptReason(reason?: string): {

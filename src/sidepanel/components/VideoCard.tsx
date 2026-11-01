@@ -583,10 +583,13 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                   v.videoWidth && v.videoHeight
                     ? `${v.videoWidth}×${v.videoHeight}`
                     : v.descriptors.join(' ') || `候補 ${idx + 1}`;
+                const vSize = formatByteSize(v.fileSizeBytes);
+                const vSizeSuffix = vSize ? ` (${vSize})` : '';
                 const vState = v.readiness === 'ready' ? '' : ' [ストリーム/制限]';
                 return (
                   <option key={v.url} value={v.url}>
                     {v.format.toUpperCase()} • {vDims}
+                    {vSizeSuffix}
                     {vState}
                   </option>
                 );

@@ -17,11 +17,15 @@ import {
 import { createNetworkMediaObserver } from './network-media-observer';
 import {
   collectShadowDomVideos,
+  extractEmbeddedScriptAndConfigVideos,
   extractFromVideoElement,
   extractFromVideoLinkOrLazyElement,
+  extractPageFallbackVideoMeta,
   extractPageMetadataVideos,
   tryCaptureReadyVideoFrame,
+  type PageFallbackVideoMeta,
 } from './video-extractor';
+import { isKnownAdOrTrackerVideoUrl } from '@shared/video-utils';
 
 export interface ChunkRunnerController {
   startOrRescan(scanEpoch: number): void;
@@ -267,6 +271,12 @@ export function createChunkRunner(options: {
   let pendingIndex = 0; // O(1) pointer instead of O(N) array.shift()
   let isSliceRunning = false;
   let sliceTimer: number | null = null;
+  let cachedPageFallbackMeta: PageFallbackVideoMeta | undefined;
+
+  function getSingleVideoPageFallback(): PageFallbackVideoMeta | undefined {
+    if (!cachedPageFallbackMeta) return undefined;
+    return document.querySelectorAll('video').length === 1 ? cachedPageFallbackMeta : undefined;
+  }
 
   function processElement(el: Element) {
     if (el instanceof HTMLImageElement) {
@@ -280,6 +290,7 @@ export function createChunkRunner(options: {
         el,
         extractorContext,
         shadowVideoSet.has(el),
+        getSingleVideoPageFallback(),
       );
       if (videoGroup) enqueueVideoGroup(videoGroup);
       if (posterImageGroup) enqueueGroup(posterImageGroup);
@@ -292,6 +303,7 @@ export function createChunkRunner(options: {
           el.parentElement,
           extractorContext,
           shadowVideoSet.has(el.parentElement),
+          getSingleVideoPageFallback(),
         );
         if (videoGroup) enqueueVideoGroup(videoGroup);
         if (posterImageGroup) enqueueGroup(posterImageGroup);
@@ -473,7 +485,7 @@ export function createChunkRunner(options: {
     const target = e.target;
     if (target instanceof HTMLVideoElement) {
       const url = target.currentSrc || target.src;
-      if (!url) return;
+      if (!url || isKnownAdOrTrackerVideoUrl(url)) return;
 
       const d = target.duration;
       const isLive = d === Number.POSITIVE_INFINITY;
@@ -504,7 +516,7 @@ export function createChunkRunner(options: {
     const target = e.target;
     if (target instanceof HTMLVideoElement) {
       const url = target.currentSrc || target.src;
-      if (!url) return;
+      if (!url || isKnownAdOrTrackerVideoUrl(url)) return;
 
       const msg: ContentToBackgroundMessage = {
         channel: 'WIC_CONTENT_TO_BG',
@@ -554,9 +566,22 @@ export function createChunkRunner(options: {
       };
       safeSendMessage(statusMsg, destroy);
 
-      // Layer 2: Passive OGP / JSON-LD metadata extraction
+      // Refresh page-level OGP fallback metadata for single-player watch pages
+      cachedPageFallbackMeta = extractPageFallbackVideoMeta(document, extractorContext.baseUri);
+
+      // Layer 2A: Passive OGP / JSON-LD metadata extraction
       const metaVideoGroups = extractPageMetadataVideos(document, extractorContext);
       for (const g of metaVideoGroups) {
+        enqueueVideoGroup(g);
+      }
+
+      // Layer 2B: Passive inline <script> & player data-config embedded URL extraction
+      const scriptVideoGroups = extractEmbeddedScriptAndConfigVideos(
+        document,
+        extractorContext,
+        cachedPageFallbackMeta,
+      );
+      for (const g of scriptVideoGroups) {
         enqueueVideoGroup(g);
       }
 

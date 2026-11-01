@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RawCandidateGroup, RawVideoCandidateGroup } from '@shared/types';
+import { NetworkVideoSniffer } from '../network-sniffer';
+import { extractRequestDomainScope, parseHttpRefererAndOrigin } from '../referer-rules';
 import { SessionStore } from '../session-store';
 
 describe('SessionStore', () => {
@@ -263,5 +265,187 @@ describe('SessionStore', () => {
     snap = store.getSnapshot(tabId);
     expect(snap.selectedVideoIds).toEqual([]);
     expect(snap.selectedIds).toEqual(['item_1']);
+  });
+
+  it('merges 301-redirected CDN MP4 URLs via NetworkVideoSniffer without duplicating cards or downgrading HD', () => {
+    let redirectListener:
+      | ((details: chrome.webRequest.WebRedirectionResponseDetails) => void)
+      | undefined;
+    let headersListener:
+      | ((details: chrome.webRequest.WebResponseHeadersDetails) => void)
+      | undefined;
+
+    const sessionData: Record<string, unknown> = {};
+    (globalThis as unknown as { chrome: unknown }).chrome = {
+      storage: {
+        session: {
+          get: vi.fn(async () => sessionData),
+          set: vi.fn(async (items) => Object.assign(sessionData, items)),
+          remove: vi.fn(async () => {}),
+        },
+      },
+      webRequest: {
+        onBeforeRedirect: {
+          addListener: vi.fn((cb) => {
+            redirectListener = cb;
+          }),
+          removeListener: vi.fn(() => {
+            redirectListener = undefined;
+          }),
+        },
+        onHeadersReceived: {
+          addListener: vi.fn((cb) => {
+            headersListener = cb;
+          }),
+          removeListener: vi.fn(() => {
+            headersListener = undefined;
+          }),
+        },
+      },
+    };
+
+    const sniffer = new NetworkVideoSniffer(store);
+    sniffer.startSniffing();
+    expect(sniffer.isSniffing()).toBe(true);
+
+    // Case 1: SD-only TokyoMotion video -> resolves to direct www47 .mp4 CDN URL
+    const sdTabId = 301;
+    store.resetSessionForNewPage(
+      sdTabId,
+      'https://www.tokyomotion.net/video/3741005/test',
+      'watching',
+      'Test Video',
+    );
+    store.mergeVideoCandidateGroups(
+      sdTabId,
+      1,
+      [
+        {
+          occurrenceKey: 'el_1::video::sd',
+          primaryUrl: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+          domOrder: 1,
+          durationSec: 285.05,
+          posterUrl: 'https://cdn.tokyomotion.net/thumbs/3741005.jpg',
+          variants: [
+            {
+              url: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+              role: 'source-tag',
+              source: 'video-source',
+              descriptor: 'SD',
+              mimeHint: 'video/mp4',
+              videoWidth: null,
+              videoHeight: null,
+            },
+          ],
+        },
+      ],
+      'https://www.tokyomotion.net/video/3741005/test',
+    );
+
+    const resolvedSdCdnUrl =
+      'https://www47.tokyomotion.net/video/5bef0447760e69bf70c8ff816085f40d/6ae73a89/iphone/3741005.mp4?md5=LBd_l-x41sPt-IllUbwDeg&expires=1793542297';
+
+    redirectListener?.({
+      tabId: sdTabId,
+      url: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+      redirectUrl: resolvedSdCdnUrl,
+      statusCode: 301,
+    } as chrome.webRequest.WebRedirectionResponseDetails);
+
+    headersListener?.({
+      tabId: sdTabId,
+      url: resolvedSdCdnUrl,
+      statusCode: 206,
+      responseHeaders: [
+        { name: 'content-type', value: 'video/mp4' },
+        { name: 'content-range', value: 'bytes 0-65535/13364887' },
+      ],
+    } as chrome.webRequest.WebResponseHeadersDetails);
+
+    const sdSnap = store.getSnapshot(sdTabId);
+    expect(sdSnap.videos).toHaveLength(1);
+    expect(sdSnap.videos[0]?.selectedUrl).toBe(resolvedSdCdnUrl);
+    expect(sdSnap.videos[0]?.variants.find((v) => v.url === resolvedSdCdnUrl)?.fileSizeBytes).toBe(
+      13_364_887,
+    );
+
+    // Case 2: HD + SD video -> playing SD stream on page MUST NOT downgrade selected HD variant
+    const hdTabId = 302;
+    store.resetSessionForNewPage(
+      hdTabId,
+      'https://www.tokyomotion.net/video/7156341/hd-test',
+      'watching',
+      'HD Video',
+    );
+    store.mergeVideoCandidateGroups(
+      hdTabId,
+      1,
+      [
+        {
+          occurrenceKey: 'el_1::video::hd',
+          primaryUrl: 'https://www.tokyomotion.net/vsrc/sd/111111',
+          domOrder: 1,
+          durationSec: 120,
+          variants: [
+            {
+              url: 'https://www.tokyomotion.net/vsrc/sd/111111',
+              role: 'source-tag',
+              source: 'video-source',
+              descriptor: 'SD',
+              mimeHint: 'video/mp4',
+              videoWidth: null,
+              videoHeight: null,
+            },
+            {
+              url: 'https://www.tokyomotion.net/vsrc/hd/222222',
+              role: 'source-tag',
+              source: 'video-source',
+              descriptor: 'HD',
+              mimeHint: 'video/mp4',
+              videoWidth: null,
+              videoHeight: null,
+            },
+          ],
+        },
+      ],
+      'https://www.tokyomotion.net/video/7156341/hd-test',
+    );
+
+    redirectListener?.({
+      tabId: hdTabId,
+      url: 'https://www.tokyomotion.net/vsrc/sd/111111',
+      redirectUrl: 'https://www47.tokyomotion.net/video/abc/iphone/7156341.mp4?md5=xyz',
+      statusCode: 301,
+    } as chrome.webRequest.WebRedirectionResponseDetails);
+
+    headersListener?.({
+      tabId: hdTabId,
+      url: 'https://www47.tokyomotion.net/video/abc/iphone/7156341.mp4?md5=xyz',
+      statusCode: 206,
+      responseHeaders: [
+        { name: 'content-type', value: 'video/mp4' },
+        { name: 'content-range', value: 'bytes 0-4095/20000000' },
+      ],
+    } as chrome.webRequest.WebResponseHeadersDetails);
+
+    const hdSnap = store.getSnapshot(hdTabId);
+    expect(hdSnap.videos).toHaveLength(1);
+    expect(hdSnap.videos[0]?.selectedUrl).toBe('https://www.tokyomotion.net/vsrc/hd/222222');
+
+    // Stopping sniffer detaches webRequest listeners cleanly
+    sniffer.stopSniffing();
+    expect(sniffer.isSniffing()).toBe(false);
+    expect(redirectListener).toBeUndefined();
+    expect(headersListener).toBeUndefined();
+
+    // Verify Referer / requestDomains helper scopes subdomains cleanly
+    expect(extractRequestDomainScope('https://www47.tokyomotion.net/video/3741005.mp4')).toBe(
+      'tokyomotion.net',
+    );
+    expect(extractRequestDomainScope('https://media.example.co.jp/watch/1')).toBe('example.co.jp');
+    expect(parseHttpRefererAndOrigin('https://www.tokyomotion.net/video/3741005/a')).toEqual({
+      referer: 'https://www.tokyomotion.net/video/3741005/a',
+      origin: 'https://www.tokyomotion.net',
+    });
   });
 });

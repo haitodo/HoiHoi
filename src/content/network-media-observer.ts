@@ -1,5 +1,6 @@
 import type { RawVideoCandidateGroup } from '@shared/types';
 import {
+  isKnownAdOrTrackerVideoUrl,
   isLikelyVideoUrl,
   isSegmentChunkNoiseUrl,
   resolveAndValidateVideoUrl,
@@ -32,7 +33,7 @@ export function createNetworkMediaObserver(
     const resolved = resolveAndValidateVideoUrl(rawUrl, ctx.baseUri);
     if (!resolved || seenUrls.has(resolved)) return null;
 
-    if (isSegmentChunkNoiseUrl(resolved)) {
+    if (isSegmentChunkNoiseUrl(resolved) || isKnownAdOrTrackerVideoUrl(resolved)) {
       return null;
     }
 

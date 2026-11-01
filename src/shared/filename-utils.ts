@@ -243,10 +243,83 @@ const VIDEO_FORMAT_TO_EXTENSION: Record<VideoFormat, string> = {
 };
 
 /**
+ * Extracts a filename from an HTTP `Content-Disposition` header if present.
+ * Supports RFC 5987 `filename*=UTF-8''...` as well as quoted/unquoted `filename=...`.
+ */
+export function extractFilenameFromContentDisposition(header?: string | null): string | undefined {
+  if (!header) return undefined;
+
+  // 1. RFC 5987 `filename*=`
+  const starMatch = /filename\*\s*=\s*(?:[a-zA-Z0-9_-]+'[a-zA-Z0-9_-]*')?([^;\r\n]+)/i.exec(header);
+  if (starMatch?.[1]) {
+    const raw = starMatch[1].trim().replace(/^"(.*)"$/, '$1');
+    let decoded = raw;
+    try {
+      decoded = decodeURIComponent(raw);
+    } catch {
+      // Keep raw if malformed percent-encoding
+    }
+    const base = decoded.split(/[\\/]/).pop()?.trim();
+    if (base) return base;
+  }
+
+  // 2. Quoted `filename="..."`
+  const quotedMatch = /filename\s*=\s*"([^"]+)"/i.exec(header);
+  if (quotedMatch?.[1]) {
+    const base = quotedMatch[1].trim().split(/[\\/]/).pop()?.trim();
+    if (base) return base;
+  }
+
+  // 3. Unquoted `filename=...`
+  const plainMatch = /filename\s*=\s*([^;\s\r\n"]+)/i.exec(header);
+  if (plainMatch?.[1]) {
+    const base = plainMatch[1].trim().split(/[\\/]/).pop()?.trim();
+    if (base) return base;
+  }
+
+  return undefined;
+}
+
+function splitFilenameStemAndExt(filename: string): { stem: string; ext: string } {
+  const lastDot = filename.lastIndexOf('.');
+  if (lastDot > 0 && lastDot < filename.length - 1) {
+    return {
+      stem: filename.slice(0, lastDot),
+      ext: filename.slice(lastDot).toLowerCase(),
+    };
+  }
+  return { stem: filename, ext: '' };
+}
+
+function extractStemAndExtFromHttpUrl(urlStr?: string): { stem: string; ext: string } | null {
+  if (!urlStr || (!urlStr.startsWith('http:') && !urlStr.startsWith('https:'))) {
+    return null;
+  }
+  try {
+    const parsed = new URL(urlStr);
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const lastSegment = segments[segments.length - 1];
+    if (!lastSegment) return null;
+
+    let decoded = lastSegment;
+    try {
+      decoded = decodeURIComponent(lastSegment);
+    } catch {
+      // Keep raw segment if decodeURIComponent throws
+    }
+    return splitFilenameStemAndExt(decoded);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Builds a safe, cross-platform filename for downloading video files (`video_mode_design.md` §5).
  */
 export function buildSafeVideoDownloadFilename(options: {
   targetUrl: string;
+  resolvedUrl?: string;
+  contentDisposition?: string;
   domain?: string;
   pageTitle?: string;
   folderName?: string;
@@ -257,6 +330,8 @@ export function buildSafeVideoDownloadFilename(options: {
 }): string {
   const {
     targetUrl,
+    resolvedUrl,
+    contentDisposition,
     domain,
     pageTitle,
     folderName,
@@ -265,33 +340,46 @@ export function buildSafeVideoDownloadFilename(options: {
     mimeHint,
     overrideExtension,
   } = options;
-  const inferredFormat = format ?? inferVideoFormat(targetUrl, mimeHint);
+  const resolvedFormat = resolvedUrl ? inferVideoFormat(resolvedUrl, mimeHint) : 'unknown';
+  const inferredFormat =
+    format && format !== 'unknown'
+      ? format
+      : resolvedFormat !== 'unknown'
+        ? resolvedFormat
+        : inferVideoFormat(targetUrl, mimeHint);
   const extFromFormat = VIDEO_FORMAT_TO_EXTENSION[inferredFormat];
 
   let rawStem = '';
   let rawExt = '';
 
-  if (targetUrl.startsWith('http:') || targetUrl.startsWith('https:')) {
-    try {
-      const parsed = new URL(targetUrl);
-      const segments = parsed.pathname.split('/').filter(Boolean);
-      const lastSegment = segments[segments.length - 1];
+  const cdFilename = extractFilenameFromContentDisposition(contentDisposition);
+  if (cdFilename) {
+    const split = splitFilenameStemAndExt(cdFilename);
+    rawStem = split.stem;
+    rawExt = split.ext;
+  } else {
+    const fromResolved = extractStemAndExtFromHttpUrl(resolvedUrl);
+    const fromTarget = extractStemAndExtFromHttpUrl(targetUrl);
 
-      if (lastSegment) {
-        let decoded = lastSegment;
-        try {
-          decoded = decodeURIComponent(lastSegment);
-        } catch {}
+    const resolvedHasVideoExt = Boolean(
+      fromResolved?.ext && isValidExtensionForVideoFormat(fromResolved.ext, 'unknown'),
+    );
+    const targetHasVideoExt = Boolean(
+      fromTarget?.ext && isValidExtensionForVideoFormat(fromTarget.ext, 'unknown'),
+    );
 
-        const lastDot = decoded.lastIndexOf('.');
-        if (lastDot > 0 && lastDot < decoded.length - 1) {
-          rawStem = decoded.slice(0, lastDot);
-          rawExt = decoded.slice(lastDot).toLowerCase();
-        } else {
-          rawStem = decoded;
-        }
-      }
-    } catch {}
+    const chosen = resolvedHasVideoExt
+      ? fromResolved
+      : targetHasVideoExt
+        ? fromTarget
+        : fromResolved?.stem
+          ? fromResolved
+          : fromTarget;
+
+    if (chosen) {
+      rawStem = chosen.stem;
+      rawExt = chosen.ext;
+    }
   }
 
   if (!rawStem || rawStem.trim() === '') {

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildSafeVideoDownloadFilename } from '../filename-utils';
+import {
+  buildSafeVideoDownloadFilename,
+  extractFilenameFromContentDisposition,
+} from '../filename-utils';
 import {
   buildStreamCliCommand,
   classifyVideoDeliveryAndReadiness,
@@ -7,12 +10,15 @@ import {
   formatVideoDuration,
   getVideoResolutionTier,
   inferVideoFormat,
+  isKnownAdOrTrackerVideoUrl,
   isLikelyVideoUrl,
   isSegmentChunkNoiseUrl,
+  parseContentRangeTotalBytes,
   parseHlsMasterPlaylist,
   parseHlsMediaPlaylist,
   parseIso8601Duration,
   pickBestVideoVariantUrl,
+  stripByteRangeQueryParam,
 } from '../video-utils';
 
 describe('video-utils', () => {
@@ -106,15 +112,28 @@ describe('video-utils', () => {
     });
   });
 
-  describe('parseIso8601Duration & formatters', () => {
-    it('parses ISO 8601 and colon durations accurately', () => {
+  describe('parseIso8601Duration, Content-Range, & ad-host helpers', () => {
+    it('parses ISO 8601, colon, and plain numeric seconds durations accurately', () => {
       expect(parseIso8601Duration('PT1H2M30S')).toBe(3750);
       expect(parseIso8601Duration('PT45.5S')).toBe(45.5);
       expect(parseIso8601Duration('02:14')).toBe(134);
+      expect(parseIso8601Duration('285.05')).toBe(285.05);
       expect(formatVideoDuration(134)).toBe('2:14');
+      expect(formatVideoDuration(285.05)).toBe('4:45');
       expect(formatVideoDuration(3750)).toBe('1:02:30');
       expect(formatVideoDuration(null, true)).toBe('LIVE');
       expect(formatByteSize(50 * 1024 * 1024)).toBe('50.0 MB');
+    });
+
+    it('parses total bytes from Content-Range and filters VAST ad hosts', () => {
+      expect(parseContentRangeTotalBytes('bytes 0-1023/13364887')).toBe(13_364_887);
+      expect(parseContentRangeTotalBytes('bytes 0-4095/*')).toBeNull();
+      expect(isKnownAdOrTrackerVideoUrl('https://syndication.realsrv.com/splash.php')).toBe(true);
+      expect(isKnownAdOrTrackerVideoUrl('https://cdn.exoclick.com/preroll.mp4')).toBe(true);
+      expect(isKnownAdOrTrackerVideoUrl('https://www47.tokyomotion.net/video/abc/3741005.mp4')).toBe(false);
+      expect(stripByteRangeQueryParam('https://cdn.example.com/clip.mp4?token=1&range=0-65535')).toBe(
+        'https://cdn.example.com/clip.mp4?token=1',
+      );
     });
   });
 
@@ -147,6 +166,48 @@ describe('video-utils', () => {
         },
       ]);
       expect(best).toBe('https://cdn.example.com/video_1080p.mp4');
+    });
+
+    it('scores HD over SD descriptors and prefers concrete .mp4 CDN URLs at equal quality', () => {
+      expect(
+        pickBestVideoVariantUrl([
+          {
+            url: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+            format: 'mp4',
+            readiness: 'ready',
+            roles: ['source-tag'],
+            descriptors: ['SD'],
+          },
+          {
+            url: 'https://www.tokyomotion.net/vsrc/hd/9f11ccb5602e683a9981',
+            format: 'mp4',
+            readiness: 'ready',
+            roles: ['source-tag'],
+            descriptors: ['HD'],
+          },
+        ]),
+      ).toBe('https://www.tokyomotion.net/vsrc/hd/9f11ccb5602e683a9981');
+
+      expect(
+        pickBestVideoVariantUrl([
+          {
+            url: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+            format: 'mp4',
+            readiness: 'ready',
+            roles: ['source-tag'],
+            descriptors: ['SD'],
+            fileSizeBytes: 13_364_887,
+          },
+          {
+            url: 'https://www47.tokyomotion.net/video/5bef/iphone/3741005.mp4?md5=LBd&expires=179',
+            format: 'mp4',
+            readiness: 'ready',
+            roles: ['network'],
+            descriptors: ['SD'],
+            fileSizeBytes: 13_364_887,
+          },
+        ]),
+      ).toBe('https://www47.tokyomotion.net/video/5bef/iphone/3741005.mp4?md5=LBd&expires=179');
     });
   });
 
@@ -242,6 +303,24 @@ describe('video-utils', () => {
         overrideExtension: '.ts',
       });
       expect(mergedHlsName).toBe('Anime Episode 1/episode_01_1080p.ts');
+
+      // Redirected CDN URL basename (e.g. TokyoMotion /vsrc/sd/... -> .../3741005.mp4)
+      const redirectedName = buildSafeVideoDownloadFilename({
+        targetUrl: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+        resolvedUrl:
+          'https://www47.tokyomotion.net/video/5bef0447760e69bf70c8ff816085f40d/6ae73a89/iphone/3741005.mp4?md5=LBd_l-x41sPt-IllUbwDeg&expires=1793542297',
+        pageTitle: 'TokyoMotion Sample Video',
+        domain: 'www.tokyomotion.net',
+        format: 'mp4',
+      });
+      expect(redirectedName).toBe('TokyoMotion Sample Video/3741005.mp4');
+
+      // Content-Disposition RFC 5987 UTF-8 filename priority
+      expect(
+        extractFilenameFromContentDisposition(
+          "attachment; filename=\"fallback.mp4\"; filename*=UTF-8''%E3%83%86%E3%82%B9%E3%83%88%E5%8B%95%E7%94%BB.mp4",
+        ),
+      ).toBe('テスト動画.mp4');
     });
   });
 });

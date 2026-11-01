@@ -15,7 +15,9 @@
     "scripting",
     "downloads",
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "declarativeNetRequest",
+    "webRequest"
   ],
   "host_permissions": [
     "http://*/*",

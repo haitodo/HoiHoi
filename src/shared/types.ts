@@ -197,7 +197,9 @@ export type VideoDetectionSource =
   | 'lazy-video-attr'
   | 'meta-ogp'
   | 'json-ld'
-  | 'network-resource';
+  | 'script-embed'
+  | 'network-resource'
+  | 'network-header';
 
 /** Role of a candidate URL inside a `VideoItem.variants` list. */
 export type VideoVariantRole =

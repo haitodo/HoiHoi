@@ -6,6 +6,8 @@ import {
   type MessageResult,
 } from '@shared/messages';
 import { downloadManager } from './download-manager';
+import { networkSniffer } from './network-sniffer';
+import { refererRuleManager } from './referer-rules';
 import { sessionStore } from './session-store';
 import {
   bootstrapTabScan,
@@ -51,11 +53,21 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 // Connect port listener to track Side Panel lifecycle
+let openSidePanelPorts = 0;
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === PORT_NAMES.SIDEPANEL_LIFECYCLE) {
+    openSidePanelPorts += 1;
+    networkSniffer.startSniffing();
+
     port.onDisconnect.addListener(() => {
-      // Side Panel closed -> stop observers across tracked tabs to eliminate idle load
-      void stopAllScanners();
+      openSidePanelPorts = Math.max(0, openSidePanelPorts - 1);
+      if (openSidePanelPorts === 0) {
+        // Side Panel closed -> stop webRequest sniffer, idle DNR rules, and content observers
+        networkSniffer.stopSniffing();
+        void refererRuleManager.clearIdleRulesIfPossible();
+        void stopAllScanners();
+      }
     });
   }
 });
@@ -172,6 +184,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
                 }
               } catch {}
             }
+            void refererRuleManager.setActiveTabContext(snapshot.pageUrl);
             sendResponse({ ok: true, data: snapshot });
             break;
           }
@@ -302,6 +315,18 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
               totalBytes: message.totalBytes,
             });
             sendResponse({ ok });
+            break;
+          }
+
+          case 'PANEL_REPORT_HTTP_FETCH_PROGRESS': {
+            downloadManager.handleHttpFetchProgress(
+              tabId,
+              message.itemId,
+              message.transferId,
+              message.bytesReceived,
+              message.totalBytes,
+            );
+            sendResponse({ ok: true });
             break;
           }
 

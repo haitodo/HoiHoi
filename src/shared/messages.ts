@@ -165,10 +165,41 @@ export type BlobStreamPortMessage =
       error: string;
     };
 
+export type HttpVideoFetchResponse =
+  | {
+      mode: 'object_url';
+      objectUrl: string;
+      finalUrl: string;
+      mimeType: string;
+      totalBytes: number;
+      contentDisposition?: string;
+    }
+  | {
+      mode: 'direct_url_fallback';
+      finalUrl: string;
+      mimeType?: string;
+      totalBytes?: number;
+      contentDisposition?: string;
+    };
+
 export type PanelInternalRequestMessage =
   | {
       channel: 'WIC_BG_TO_PANEL_RPC';
       type: 'PANEL_CREATE_OBJECT_URL_FROM_TRANSFER';
+      transferId: string;
+    }
+  | {
+      channel: 'WIC_BG_TO_PANEL_RPC';
+      type: 'PANEL_FETCH_HTTP_VIDEO_TO_OBJECT_URL';
+      tabId: number;
+      itemId: string;
+      transferId: string;
+      url: string;
+      maxBytes: number;
+    }
+  | {
+      channel: 'WIC_BG_TO_PANEL_RPC';
+      type: 'PANEL_ABORT_HTTP_VIDEO_FETCH';
       transferId: string;
     }
   | {
@@ -276,6 +307,15 @@ export type PanelToBackgroundMessage =
       sourceManifestUrl: string;
       containerExtension: '.mp4' | '.ts';
       totalBytes: number;
+    }
+  | {
+      channel: 'WIC_PANEL_TO_BG';
+      type: 'PANEL_REPORT_HTTP_FETCH_PROGRESS';
+      tabId: number;
+      itemId: string;
+      transferId: string;
+      bytesReceived: number;
+      totalBytes?: number;
     }
   | {
       channel: 'WIC_PANEL_TO_BG';

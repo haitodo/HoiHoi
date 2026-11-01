@@ -12,6 +12,7 @@ import type {
 } from '@shared/types';
 import { resolveAndValidateImageUrl } from '@shared/url-utils';
 import {
+  isKnownAdOrTrackerVideoUrl,
   isLikelyVideoUrl,
   isSegmentChunkNoiseUrl,
   parseIso8601Duration,
@@ -19,7 +20,14 @@ import {
 } from '@shared/video-utils';
 import type { ExtractorContext } from './dom-extractor';
 
+export interface PageFallbackVideoMeta {
+  posterUrl?: string;
+  durationSec: number | null;
+}
+
 const MAX_POSTER_SNAPSHOT_EDGE_PX = 280;
+const MAX_SCRIPT_SCAN_CHARS = 512_000;
+const MAX_SCRIPT_EXTRACTED_URLS = 30;
 
 function getOrAssignElementId(el: Element, ctx: ExtractorContext): number {
   let id = ctx.elementIdMap.get(el);
@@ -146,6 +154,7 @@ export function extractFromVideoElement(
   video: HTMLVideoElement,
   ctx: ExtractorContext,
   isInsideShadowDom = false,
+  pageFallbackMeta?: PageFallbackVideoMeta,
 ): {
   videoGroup: RawVideoCandidateGroup | null;
   posterImageGroup: RawCandidateGroup | null;
@@ -161,7 +170,8 @@ export function extractFromVideoElement(
   const rawPoster =
     video.getAttribute('poster') ||
     video.getAttribute('data-poster') ||
-    video.getAttribute('data-thumb');
+    video.getAttribute('data-thumb') ||
+    video.getAttribute('slideImage');
   if (rawPoster) {
     const validPoster = resolveAndValidateImageUrl(rawPoster, baseUri);
     if (validPoster) {
@@ -182,12 +192,12 @@ export function extractFromVideoElement(
       };
     }
   } else {
-    // Only snapshot if frame is already decoded in memory (0 bytes network cost)
-    posterUrl = tryCaptureReadyVideoFrame(video);
+    // Only snapshot if frame is already decoded in memory (0 bytes network cost), else page fallback
+    posterUrl = tryCaptureReadyVideoFrame(video) ?? pageFallbackMeta?.posterUrl;
   }
 
   const variants: RawVideoVariantCandidate[] = [];
-  const seenUrls = new Set<string>();
+  const variantByOriginalUrl = new Map<string, RawVideoVariantCandidate>();
   const primarySourceType: VideoDetectionSource = isInsideShadowDom
     ? 'shadow-video'
     : 'video-element';
@@ -202,25 +212,38 @@ export function extractFromVideoElement(
   ) => {
     if (!rawUrl) return;
     const valid = resolveAndValidateVideoUrl(rawUrl, baseUri);
-    if (!valid || isSegmentChunkNoiseUrl(valid)) return;
-    if (seenUrls.has(valid)) return;
-    seenUrls.add(valid);
+    if (!valid || isSegmentChunkNoiseUrl(valid) || isKnownAdOrTrackerVideoUrl(valid)) return;
 
-    variants.push(
-      registerVideoVariant(
-        valid,
-        role,
-        source,
-        matchLoadedDims ? videoWidth : null,
-        matchLoadedDims ? videoHeight : null,
-        ctx,
-        {
-          descriptor,
-          mimeHint,
-          isDrmProtected: isDrm,
-        },
-      ),
+    const existing = variantByOriginalUrl.get(valid);
+    if (existing) {
+      if (mimeHint && !existing.mimeHint) {
+        existing.mimeHint = mimeHint;
+      }
+      if (descriptor && !existing.descriptor) {
+        existing.descriptor = descriptor;
+      }
+      if (matchLoadedDims) {
+        if (videoWidth && !existing.videoWidth) existing.videoWidth = videoWidth;
+        if (videoHeight && !existing.videoHeight) existing.videoHeight = videoHeight;
+      }
+      return;
+    }
+
+    const registered = registerVideoVariant(
+      valid,
+      role,
+      source,
+      matchLoadedDims ? videoWidth : null,
+      matchLoadedDims ? videoHeight : null,
+      ctx,
+      {
+        descriptor,
+        mimeHint,
+        isDrmProtected: isDrm,
+      },
     );
+    variantByOriginalUrl.set(valid, registered);
+    variants.push(registered);
   };
 
   // 1. currentSrc (if browser already selected a source)
@@ -253,12 +276,16 @@ export function extractFromVideoElement(
       sourceEl.getAttribute('data-src') ||
       sourceEl.getAttribute('data-video-src');
     const mimeType = sourceEl.getAttribute('type') || undefined;
-    const label =
+    const rawLabel =
       sourceEl.getAttribute('label') ||
+      sourceEl.getAttribute('title') ||
       sourceEl.getAttribute('res') ||
       sourceEl.getAttribute('data-res') ||
+      sourceEl.getAttribute('data-quality') ||
       sourceEl.getAttribute('size') ||
+      (sourceEl.hasAttribute('data-fluid-hd') ? 'HD' : undefined) ||
       undefined;
+    const label = rawLabel?.trim();
     const descriptor = label ? (/^\d+$/.test(label) ? `${label}p` : label) : undefined;
     const resolvedSourceUrl = sSrc ? resolveAndValidateVideoUrl(sSrc, baseUri) : null;
     const matchesCurrent = Boolean(resolvedSourceUrl && resolvedSourceUrl === video.currentSrc);
@@ -289,12 +316,15 @@ export function extractFromVideoElement(
     return { videoGroup: null, posterImageGroup };
   }
 
+  const effectiveDurationSec =
+    durationSec ?? (!isLive ? (pageFallbackMeta?.durationSec ?? null) : null);
+
   const primaryUrl = variants[0]!.url;
   const videoGroup: RawVideoCandidateGroup = {
     occurrenceKey: `el_${elId}::video::${primaryUrl}`,
     primaryUrl,
     domOrder: ctx.domOrderCounter(),
-    durationSec,
+    durationSec: effectiveDurationSec,
     isLive,
     posterUrl,
     variants,
@@ -327,7 +357,9 @@ export function extractFromVideoLinkOrLazyElement(
     if (!rawHref) return null;
     const resolved = resolveAndValidateVideoUrl(rawHref, baseUri);
     const typeHint = el.getAttribute('type') || undefined;
-    if (!resolved || !isLikelyVideoUrl(resolved, typeHint)) return null;
+    if (!resolved || !isLikelyVideoUrl(resolved, typeHint) || isKnownAdOrTrackerVideoUrl(resolved)) {
+      return null;
+    }
 
     // Passively reuse enclosed thumbnail <img> as poster if present
     let posterUrl: string | undefined;
@@ -362,7 +394,7 @@ export function extractFromVideoLinkOrLazyElement(
     const rawVal = el.getAttribute(attr);
     if (!rawVal) continue;
     const resolved = resolveAndValidateVideoUrl(rawVal, baseUri);
-    if (resolved && !isSegmentChunkNoiseUrl(resolved)) {
+    if (resolved && !isSegmentChunkNoiseUrl(resolved) && !isKnownAdOrTrackerVideoUrl(resolved)) {
       // Ensure generic attributes like data-stream actually look like a video URL
       if (
         attr === 'data-mp4' ||
@@ -397,6 +429,27 @@ export function extractFromVideoLinkOrLazyElement(
 }
 
 /**
+ * Extracts page-level OpenGraph poster & duration metadata so primary `<video preload="none">`
+ * elements on watch pages can display duration & thumbnail before playback starts.
+ */
+export function extractPageFallbackVideoMeta(
+  doc: Document,
+  baseUriOverride?: string,
+): PageFallbackVideoMeta {
+  const baseUri = baseUriOverride || doc.baseURI;
+  const ogImageMeta = doc.querySelector('meta[property="og:image"], meta[name="twitter:image"]');
+  const posterUrl = ogImageMeta?.getAttribute('content')
+    ? (resolveAndValidateImageUrl(ogImageMeta.getAttribute('content')!, baseUri) ?? undefined)
+    : undefined;
+  const durationSec = parseIso8601Duration(
+    doc
+      .querySelector('meta[property="og:video:duration"], meta[property="video:duration"]')
+      ?.getAttribute('content'),
+  );
+  return { posterUrl, durationSec };
+}
+
+/**
  * Layer 2: Passively extracts video URLs, posters, dimensions, and ISO-8601 durations from
  * OpenGraph `<meta>` tags and `<script type="application/ld+json">` `VideoObject` entries.
  */
@@ -408,10 +461,10 @@ export function extractPageMetadataVideos(
   const baseUri = doc.baseURI || ctx.baseUri;
 
   // 1. OpenGraph & Twitter stream meta tags
-  const ogImageMeta = doc.querySelector('meta[property="og:image"], meta[name="twitter:image"]');
-  const ogPosterUrl = ogImageMeta?.getAttribute('content')
-    ? (resolveAndValidateImageUrl(ogImageMeta.getAttribute('content')!, baseUri) ?? undefined)
-    : undefined;
+  const { posterUrl: ogPosterUrl, durationSec: ogDurationSec } = extractPageFallbackVideoMeta(
+    doc,
+    baseUri,
+  );
 
   const ogWidthRaw = Number(
     doc.querySelector('meta[property="og:video:width"]')?.getAttribute('content') || 0,
@@ -421,9 +474,6 @@ export function extractPageMetadataVideos(
   );
   const ogTypeHint =
     doc.querySelector('meta[property="og:video:type"]')?.getAttribute('content') || undefined;
-  const ogDurationSec = parseIso8601Duration(
-    doc.querySelector('meta[property="og:video:duration"], meta[property="video:duration"]')?.getAttribute('content'),
-  );
 
   const metaSelectors = [
     'meta[property="og:video:secure_url"]',
@@ -439,7 +489,12 @@ export function extractPageMetadataVideos(
       const content = metas[i]?.getAttribute('content');
       if (!content) continue;
       const resolved = resolveAndValidateVideoUrl(content, baseUri);
-      if (resolved && isLikelyVideoUrl(resolved, ogTypeHint) && !metaUrls.has(resolved)) {
+      if (
+        resolved &&
+        isLikelyVideoUrl(resolved, ogTypeHint) &&
+        !isKnownAdOrTrackerVideoUrl(resolved) &&
+        !metaUrls.has(resolved)
+      ) {
         metaUrls.add(resolved);
         groups.push({
           occurrenceKey: `meta::ogp::${resolved}`,
@@ -481,7 +536,13 @@ export function extractPageMetadataVideos(
         const encodingFormat =
           typeof vo.encodingFormat === 'string' ? vo.encodingFormat : undefined;
         const resolvedUrl = resolveAndValidateVideoUrl(rawContentUrl, baseUri);
-        if (!resolvedUrl || !isLikelyVideoUrl(resolvedUrl, encodingFormat)) continue;
+        if (
+          !resolvedUrl ||
+          !isLikelyVideoUrl(resolvedUrl, encodingFormat) ||
+          isKnownAdOrTrackerVideoUrl(resolvedUrl)
+        ) {
+          continue;
+        }
 
         let posterUrl: string | undefined;
         const rawThumb = Array.isArray(vo.thumbnailUrl) ? vo.thumbnailUrl[0] : vo.thumbnailUrl;
@@ -509,6 +570,116 @@ export function extractPageMetadataVideos(
     } catch {
       // Ignore malformed JSON-LD blocks on page
     }
+  }
+
+  return groups;
+}
+
+const QUICK_VIDEO_TOKEN_RE = /(?:\.mp4|\.m3u8|\.webm|\.mov|\.m4v|\.mpd)\b/i;
+const EMBEDDED_HTTP_URL_RE = /https?:(?:\/\/|\\\/\\\/)[^\s"'<>`()]+/gi;
+
+function unescapeEmbeddedUrl(raw: string): string {
+  return raw
+    .replace(/\\\//g, '/')
+    .replace(/\\u0026/gi, '&')
+    .replace(/\\u003d/gi, '=')
+    .replace(/\\u003f/gi, '?')
+    .replace(/&amp;/gi, '&')
+    .replace(/[.,;}\])\\]+$/, '');
+}
+
+function collectValidEmbeddedVideoUrls(text: string, baseUri: string, out: string[]): void {
+  if (!text || !QUICK_VIDEO_TOKEN_RE.test(text)) return;
+  const bounded = text.length > MAX_SCRIPT_SCAN_CHARS ? text.slice(0, MAX_SCRIPT_SCAN_CHARS) : text;
+  EMBEDDED_HTTP_URL_RE.lastIndex = 0;
+
+  let match: RegExpExecArray | null;
+  while ((match = EMBEDDED_HTTP_URL_RE.exec(bounded)) !== null) {
+    if (out.length >= MAX_SCRIPT_EXTRACTED_URLS) break;
+    const cleaned = unescapeEmbeddedUrl(match[0]);
+    const resolved = resolveAndValidateVideoUrl(cleaned, baseUri);
+    if (
+      resolved &&
+      isLikelyVideoUrl(resolved) &&
+      !isSegmentChunkNoiseUrl(resolved) &&
+      !isKnownAdOrTrackerVideoUrl(resolved)
+    ) {
+      out.push(resolved);
+    }
+  }
+}
+
+/**
+ * Layer 2B: Passively scans inline `<script>` player initializers and `data-setup`/`data-config`
+ * attributes for embedded `.mp4` / `.m3u8` / `.webm` URLs (including JSON-escaped `https:\/\/...`).
+ * Zero network requests and zero polling.
+ */
+export function extractEmbeddedScriptAndConfigVideos(
+  doc: Document,
+  ctx: ExtractorContext,
+  pageFallbackMeta?: PageFallbackVideoMeta,
+): RawVideoCandidateGroup[] {
+  const groups: RawVideoCandidateGroup[] = [];
+  const baseUri = doc.baseURI || ctx.baseUri;
+  const seenUrls = new Set<string>();
+
+  // 1. Player configuration attributes on DOM elements (grouped per player container)
+  const configAttrs = ['data-setup', 'data-config', 'data-options', 'data-player', 'flashvars'];
+  const configEls = doc.querySelectorAll(
+    '[data-setup], [data-config], [data-options], [data-player], [flashvars]',
+  );
+  for (let i = 0; i < configEls.length; i++) {
+    const el = configEls[i]!;
+    const elUrls: string[] = [];
+    for (const attr of configAttrs) {
+      const val = el.getAttribute(attr);
+      if (val) collectValidEmbeddedVideoUrls(val, baseUri, elUrls);
+    }
+    const uniqueElUrls = elUrls.filter((u) => {
+      if (seenUrls.has(u)) return false;
+      seenUrls.add(u);
+      return true;
+    });
+    if (uniqueElUrls.length > 0) {
+      const elId = getOrAssignElementId(el, ctx);
+      const variants = uniqueElUrls.map((u) =>
+        registerVideoVariant(u, 'metadata', 'script-embed', null, null, ctx),
+      );
+      groups.push({
+        occurrenceKey: `el_${elId}::config-embed::${variants[0]!.url}`,
+        primaryUrl: variants[0]!.url,
+        domOrder: ctx.domOrderCounter(),
+        durationSec: null,
+        variants,
+      });
+    }
+  }
+
+  // 2. Inline <script> blocks (skipping external scripts and already-parsed JSON-LD)
+  const inlineScripts = doc.querySelectorAll('script:not([src])');
+  const scriptUrls: string[] = [];
+  for (let i = 0; i < inlineScripts.length; i++) {
+    if (scriptUrls.length >= MAX_SCRIPT_EXTRACTED_URLS) break;
+    const scriptEl = inlineScripts[i]!;
+    const scriptType = (scriptEl.getAttribute('type') || '').toLowerCase();
+    if (scriptType === 'application/ld+json') continue;
+    const content = scriptEl.textContent;
+    if (content) {
+      collectValidEmbeddedVideoUrls(content, baseUri, scriptUrls);
+    }
+  }
+
+  for (const url of scriptUrls) {
+    if (seenUrls.has(url)) continue;
+    seenUrls.add(url);
+    groups.push({
+      occurrenceKey: `script::embed::${url}`,
+      primaryUrl: url,
+      domOrder: ctx.domOrderCounter(),
+      durationSec: scriptUrls.length === 1 ? (pageFallbackMeta?.durationSec ?? null) : null,
+      posterUrl: scriptUrls.length === 1 ? pageFallbackMeta?.posterUrl : undefined,
+      variants: [registerVideoVariant(url, 'metadata', 'script-embed', null, null, ctx)],
+    });
   }
 
   return groups;

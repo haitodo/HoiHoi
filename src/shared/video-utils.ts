@@ -34,6 +34,64 @@ export function resolveAndValidateVideoUrl(
   }
 }
 
+const AD_VIDEO_DOMAIN_SUFFIXES = [
+  'realsrv.com',
+  'exoclick.com',
+  'magsrv.com',
+  'doubleclick.net',
+  'googlesyndication.com',
+  'imasdk.googleapis.com',
+  '2mdn.net',
+  'juicyads.com',
+  'trafficjunky.net',
+  'tsyndicate.com',
+  'popads.net',
+  'adnxs.com',
+];
+
+/**
+ * Checks whether a media URL belongs to a known VAST / ad-network server so pre-roll ads
+ * never pollute or overwrite main video items.
+ */
+export function isKnownAdOrTrackerVideoUrl(urlStr: string): boolean {
+  try {
+    const host = new URL(urlStr).hostname.toLowerCase();
+    return AD_VIDEO_DOMAIN_SUFFIXES.some(
+      (suffix) => host === suffix || host.endsWith(`.${suffix}`),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Strips byte-range query parameters (e.g. Vimeo `&range=0-1000`) from progressive MP4/WebM URLs
+ * when needed to recover the full-file URL.
+ */
+export function stripByteRangeQueryParam(urlStr: string): string {
+  try {
+    const parsed = new URL(urlStr);
+    if (parsed.searchParams.has('range')) {
+      parsed.searchParams.delete('range');
+      return parsed.href;
+    }
+    return urlStr;
+  } catch {
+    return urlStr;
+  }
+}
+
+/**
+ * Extracts total resource byte length from an HTTP `Content-Range` header (e.g. `"bytes 0-1023/13364887"` -> `13364887`).
+ */
+export function parseContentRangeTotalBytes(contentRangeHeader?: string | null): number | null {
+  if (!contentRangeHeader) return null;
+  const m = /\/(\d+)\s*$/.exec(contentRangeHeader.trim());
+  if (!m?.[1]) return null;
+  const total = Number(m[1]);
+  return Number.isFinite(total) && total > 0 ? total : null;
+}
+
 /**
  * Filters out fragmented streaming media chunks (`.ts`, `.m4s`, DASH range segments, subtitles, keys)
  * so PerformanceResourceTiming logs never flood the video list with hundreds of 2-second chunks.
@@ -354,7 +412,8 @@ export function formatResolutionLabel(
 }
 
 /**
- * Parses ISO 8601 duration strings (e.g. `"PT1H2M30.5S"`, `"PT45S"`, `"P0DT3M"`) or `"MM:SS"` into seconds.
+ * Parses ISO 8601 duration strings (e.g. `"PT1H2M30.5S"`, `"PT45S"`), `"MM:SS"`, or plain numeric seconds
+ * strings (e.g. `"285.05"` from OpenGraph `video:duration`) into seconds.
  */
 export function parseIso8601Duration(raw: unknown): number | null {
   if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
@@ -363,6 +422,12 @@ export function parseIso8601Duration(raw: unknown): number | null {
   if (typeof raw !== 'string') return null;
   const str = raw.trim();
   if (!str) return null;
+
+  // Plain numeric seconds (e.g. <meta property="video:duration" content="285.05">)
+  if (/^\d+(?:\.\d+)?$/.test(str)) {
+    const secs = Number(str);
+    return Number.isFinite(secs) && secs > 0 ? secs : null;
+  }
 
   const isoMatch =
     /^P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/i.exec(
@@ -442,11 +507,28 @@ export function pickBestVideoVariantUrl(
     descriptors?: string[];
     videoWidth?: number | null;
     videoHeight?: number | null;
+    fileSizeBytes?: number | null;
     bitrateBps?: number | null;
   }>,
 ): string {
   if (variants.length === 0) return '';
   if (variants.length === 1) return variants[0]!.url;
+
+  const inferDescriptorArea = (rawDesc: string): number => {
+    const clean = rawDesc.trim().toLowerCase();
+    const pMatch = /(\d{3,4})p\b/i.exec(clean);
+    if (pMatch?.[1]) {
+      const h = Number(pMatch[1]);
+      return Math.round((h * h * 16) / 9);
+    }
+    if (/\b(?:4k|uhd)\b/.test(clean)) return 3840 * 2160;
+    if (/\b(?:2k|qhd)\b/.test(clean)) return 2560 * 1440;
+    if (/\b(?:fhd|full\s*hd)\b/.test(clean)) return 1920 * 1080;
+    if (/\b(?:hd|high|hq)\b/.test(clean)) return 1280 * 720;
+    if (/\b(?:sd|med|medium|standard)\b/.test(clean)) return 640 * 360;
+    if (/\b(?:ld|low|lq)\b/.test(clean)) return 426 * 240;
+    return 0;
+  };
 
   const scoreVariant = (v: (typeof variants)[number]): number => {
     let score = 0;
@@ -460,16 +542,19 @@ export function pickBestVideoVariantUrl(
       score += 50_000_000;
     }
 
-    // 3. Resolution score (pixel area or descriptor hint like "1080p")
+    // 3. Resolution score (pixel area, descriptor hint like "1080p"/"HD"/"SD", or URL path hint)
     let resScore = 0;
     if (v.videoWidth && v.videoHeight) {
       resScore = v.videoWidth * v.videoHeight;
     } else {
       for (const d of v.descriptors ?? []) {
-        const pMatch = /(\d{3,4})p/i.exec(d);
-        if (pMatch?.[1]) {
-          const h = Number(pMatch[1]);
-          resScore = Math.max(resScore, Math.round((h * h * 16) / 9));
+        resScore = Math.max(resScore, inferDescriptorArea(d));
+      }
+      if (resScore === 0) {
+        if (/\/(?:hd|high|1080p?|720p?)(?:\/|[._-]|$)/i.test(v.url)) {
+          resScore = 1280 * 720;
+        } else if (/\/(?:sd|low|480p?|360p?)(?:\/|[._-]|$)/i.test(v.url)) {
+          resScore = 640 * 360;
         }
       }
     }
@@ -484,6 +569,14 @@ export function pickBestVideoVariantUrl(
     if (v.format === 'mp4') score += 5_000;
     else if (v.format === 'webm') score += 3_000;
     else if (v.format === 'mov' || v.format === 'm4v') score += 2_000;
+
+    // 6. Concrete direct CDN URL & known file size tie-breaker (prefers resolved .mp4 over opaque redirect at equal quality)
+    if (v.fileSizeBytes && v.fileSizeBytes > 0) {
+      score += 500;
+    }
+    if (/\.(?:mp4|webm|mov|m4v)(?:[?#]|$)/i.test(v.url)) {
+      score += 250;
+    }
 
     return score;
   };

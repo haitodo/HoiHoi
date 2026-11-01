@@ -45,6 +45,7 @@ export interface InternalTabSession {
   videoByPrimaryUrl: Map<string, VideoItem>;
   videoByVariantUrl: Map<string, VideoItem>;
   videoById: Map<string, VideoItem>;
+  redirectTargetsBySourceUrl: Map<string, Set<string>>;
   seenOccurrenceKeys: Set<string>;
   selectedIds: Set<string>;
   selectedVideoIds: Set<string>;
@@ -166,6 +167,7 @@ export class SessionStore {
       videoByPrimaryUrl,
       videoByVariantUrl,
       videoById,
+      redirectTargetsBySourceUrl: new Map(),
       seenOccurrenceKeys: new Set(),
       selectedIds: new Set(snap.selectedIds || []),
       selectedVideoIds: new Set(snap.selectedVideoIds || []),
@@ -202,6 +204,7 @@ export class SessionStore {
         videoByPrimaryUrl: new Map(),
         videoByVariantUrl: new Map(),
         videoById: new Map(),
+        redirectTargetsBySourceUrl: new Map(),
         seenOccurrenceKeys: new Set(),
         selectedIds: new Set(),
         selectedVideoIds: new Set(),
@@ -306,6 +309,7 @@ export class SessionStore {
     session.videoByPrimaryUrl.clear();
     session.videoByVariantUrl.clear();
     session.videoById.clear();
+    session.redirectTargetsBySourceUrl.clear();
     session.seenOccurrenceKeys.clear();
     session.selectedIds.clear();
     session.selectedVideoIds.clear();
@@ -680,11 +684,12 @@ export class SessionStore {
 
     const modifiedVideos: VideoItem[] = [];
     let selectionChanged = false;
+    const redirectTargets = session.redirectTargetsBySourceUrl.get(params.url);
 
     for (const video of session.videos) {
       let touched = false;
       for (const variant of video.variants) {
-        if (variant.url === params.url) {
+        if (variant.url === params.url || redirectTargets?.has(variant.url)) {
           if (params.videoWidth && !variant.videoWidth) {
             variant.videoWidth = params.videoWidth;
             touched = true;
@@ -771,6 +776,166 @@ export class SessionStore {
         });
       }
     }
+  }
+
+  /**
+   * Merges a video URL observed via `chrome.webRequest` response headers into an active tab session.
+   * Links post-redirect CDN URLs (e.g. `www47.tokyomotion.net/.../3741005.mp4`) back into the
+   * originating `<video><source>` item via `redirectChainUrls` without duplicating cards.
+   */
+  mergeNetworkDetectedVideo(
+    tabId: number,
+    params: {
+      url: string;
+      redirectChainUrls?: string[];
+      mimeHint?: string;
+      fileSizeBytes?: number | null;
+    },
+  ): void {
+    const session = this.sessions.get(tabId);
+    if (
+      !session ||
+      session.scanStatus === 'unscanned' ||
+      session.scanStatus === 'restricted' ||
+      session.scanStatus === 'stale'
+    ) {
+      return;
+    }
+
+    const chainUrls = params.redirectChainUrls ?? [];
+    for (const srcUrl of chainUrls) {
+      let set = session.redirectTargetsBySourceUrl.get(srcUrl);
+      if (!set) {
+        set = new Set();
+        session.redirectTargetsBySourceUrl.set(srcUrl, set);
+      }
+      set.add(params.url);
+    }
+
+    // Look up an existing VideoItem by final URL or any URL in the redirect chain
+    let matchedVideo =
+      session.videoByVariantUrl.get(params.url) ?? session.videoByPrimaryUrl.get(params.url);
+    let sourceVariant: VideoVariant | undefined;
+
+    if (!matchedVideo) {
+      for (const hopUrl of chainUrls) {
+        const candidate =
+          session.videoByVariantUrl.get(hopUrl) ?? session.videoByPrimaryUrl.get(hopUrl);
+        if (candidate) {
+          matchedVideo = candidate;
+          sourceVariant = candidate.variants.find((v) => v.url === hopUrl);
+          break;
+        }
+      }
+    } else if (chainUrls.length > 0) {
+      for (const hopUrl of chainUrls) {
+        const found = matchedVideo.variants.find((v) => v.url === hopUrl);
+        if (found) {
+          sourceVariant = found;
+          break;
+        }
+      }
+    }
+
+    if (matchedVideo) {
+      const format = inferVideoFormat(params.url, params.mimeHint);
+      const { deliveryType, readiness, blockReason } = classifyVideoDeliveryAndReadiness({
+        url: params.url,
+        format,
+        pageUrl: session.pageUrl,
+      });
+
+      let modified = false;
+      if (!matchedVideo.sources.includes('network-header')) {
+        matchedVideo.sources.push('network-header');
+        modified = true;
+      }
+
+      if (sourceVariant && params.fileSizeBytes && !sourceVariant.fileSizeBytes) {
+        sourceVariant.fileSizeBytes = params.fileSizeBytes;
+        modified = true;
+      }
+
+      session.videoByVariantUrl.set(params.url, matchedVideo);
+      const existingVar = matchedVideo.variants.find((v) => v.url === params.url);
+      if (!existingVar) {
+        matchedVideo.variants.push({
+          url: params.url,
+          format,
+          deliveryType,
+          readiness,
+          blockReason,
+          roles: ['network'],
+          descriptors: sourceVariant ? [...sourceVariant.descriptors] : [],
+          videoWidth: sourceVariant?.videoWidth ?? null,
+          videoHeight: sourceVariant?.videoHeight ?? null,
+          fileSizeBytes: params.fileSizeBytes ?? null,
+        });
+        modified = true;
+      } else {
+        if (!existingVar.roles.includes('network')) {
+          existingVar.roles.push('network');
+          modified = true;
+        }
+        if (existingVar.format === 'unknown' && format !== 'unknown') {
+          existingVar.format = format;
+          modified = true;
+        }
+        if (params.fileSizeBytes && !existingVar.fileSizeBytes) {
+          existingVar.fileSizeBytes = params.fileSizeBytes;
+          modified = true;
+        }
+        if (sourceVariant) {
+          for (const desc of sourceVariant.descriptors) {
+            if (!existingVar.descriptors.includes(desc)) {
+              existingVar.descriptors.push(desc);
+              modified = true;
+            }
+          }
+        }
+      }
+
+      if (modified) {
+        if (!matchedVideo.manualVariantSelected) {
+          matchedVideo.selectedUrl = pickBestVideoVariantUrl(matchedVideo.variants);
+        }
+        session.revision += 1;
+        session.dirty = true;
+        this.schedulePersist();
+
+        this.emitEvent({
+          channel: 'WIC_BG_TO_PANEL',
+          type: 'EVENT_VIDEOS_UPSERTED',
+          tabId,
+          revision: session.revision,
+          upsertedVideos: [matchedVideo],
+          scanStatus: session.scanStatus,
+        });
+      }
+      return;
+    }
+
+    // No existing VideoItem matched — create a new network-detected video group
+    const nextOrder = session.videos.length + session.items.length + 1;
+    this.mergeVideoCandidateGroups(tabId, session.scanEpoch, [
+      {
+        occurrenceKey: `net::header::${params.url}`,
+        primaryUrl: params.url,
+        domOrder: nextOrder,
+        durationSec: null,
+        variants: [
+          {
+            url: params.url,
+            role: 'network',
+            source: 'network-header',
+            mimeHint: params.mimeHint,
+            videoWidth: null,
+            videoHeight: null,
+            fileSizeBytes: params.fileSizeBytes ?? null,
+          },
+        ],
+      },
+    ]);
   }
 
   /**

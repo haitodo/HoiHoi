@@ -3,7 +3,15 @@ import { PORT_NAMES } from '@shared/constants';
 import {
   isBgToPanelRpc,
   type BlobStreamPortMessage,
+  type HttpVideoFetchResponse,
+  type MessageResult,
+  type PanelToBackgroundMessage,
 } from '@shared/messages';
+import { inferVideoFormat, parseContentRangeTotalBytes } from '@shared/video-utils';
+
+const HTTP_BLOB_SLICE_FLUSH_BYTES = 8 * 1024 * 1024; // 8 MB slices keep V8 heap flat
+const PROGRESS_REPORT_THROTTLE_MS = 250;
+const SW_KEEPALIVE_INTERVAL_MS = 5_000;
 
 interface InFlightTransfer {
   mimeType: string;
@@ -48,6 +56,236 @@ export function registerSidePanelObjectUrl(objectUrl: string): void {
 export function useBlobStreamBridge(): void {
   useEffect(() => {
     const transfers = new Map<string, InFlightTransfer>();
+    const activeHttpControllers = new Map<string, AbortController>();
+
+    const reportHttpProgress = (
+      tabId: number,
+      itemId: string,
+      transferId: string,
+      bytesReceived: number,
+      totalBytes?: number,
+    ): void => {
+      const msg: PanelToBackgroundMessage = {
+        channel: 'WIC_PANEL_TO_BG',
+        type: 'PANEL_REPORT_HTTP_FETCH_PROGRESS',
+        tabId,
+        itemId,
+        transferId,
+        bytesReceived,
+        totalBytes,
+      };
+      try {
+        chrome.runtime.sendMessage(msg).catch(() => {});
+      } catch {}
+    };
+
+    const streamHttpVideoToObjectUrl = async (params: {
+      tabId: number;
+      itemId: string;
+      transferId: string;
+      url: string;
+      maxBytes: number;
+    }): Promise<MessageResult<HttpVideoFetchResponse>> => {
+      const { tabId, itemId, transferId, url, maxBytes } = params;
+      const controller = new AbortController();
+      activeHttpControllers.set(transferId, controller);
+
+      let bytesReceived = 0;
+      let totalBytes: number | undefined;
+      const keepaliveTimer = window.setInterval(() => {
+        reportHttpProgress(tabId, itemId, transferId, bytesReceived, totalBytes);
+      }, SW_KEEPALIVE_INTERVAL_MS);
+
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          credentials: 'include',
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          return {
+            ok: false,
+            error: `HTTP ${response.status}`,
+            code: `HTTP_${response.status}`,
+          };
+        }
+
+        const rawContentType = response.headers.get('content-type') || '';
+        const cleanMime = rawContentType.split(';')[0]?.trim().toLowerCase() || '';
+
+        if (cleanMime === 'text/html' || cleanMime === 'application/xhtml+xml') {
+          try {
+            await response.body?.cancel();
+          } catch {}
+          return {
+            ok: false,
+            error: '動画データの代わりにHTMLページが返されました（認証または期限切れの可能性があります）',
+            code: 'HTML_RESPONSE',
+          };
+        }
+
+        const finalUrl = response.url || url;
+        const contentDisposition = response.headers.get('content-disposition') || undefined;
+
+        const rangeTotal = parseContentRangeTotalBytes(response.headers.get('content-range'));
+        if (rangeTotal !== null) {
+          totalBytes = rangeTotal;
+        } else {
+          const rawLen = response.headers.get('content-length');
+          if (rawLen) {
+            const parsedLen = Number(rawLen);
+            if (Number.isFinite(parsedLen) && parsedLen > 0) {
+              totalBytes = parsedLen;
+            }
+          }
+        }
+
+        if (totalBytes && totalBytes > maxBytes) {
+          try {
+            await response.body?.cancel();
+          } catch {}
+          return {
+            ok: true,
+            data: {
+              mode: 'direct_url_fallback',
+              finalUrl,
+              mimeType: cleanMime || undefined,
+              totalBytes,
+              contentDisposition,
+            },
+          };
+        }
+
+        reportHttpProgress(tabId, itemId, transferId, 0, totalBytes);
+
+        const inferredFmt = inferVideoFormat(finalUrl, cleanMime || undefined);
+        const resolvedMime =
+          cleanMime && cleanMime.startsWith('video/')
+            ? cleanMime
+            : inferredFmt === 'webm'
+              ? 'video/webm'
+              : inferredFmt === 'mov'
+                ? 'video/quicktime'
+                : 'video/mp4';
+
+        if (!response.body) {
+          const blob = await response.blob();
+          const finalBlob = blob.type === resolvedMime ? blob : new Blob([blob], { type: resolvedMime });
+          const objectUrl = URL.createObjectURL(finalBlob);
+          registerSidePanelObjectUrl(objectUrl);
+          reportHttpProgress(tabId, itemId, transferId, finalBlob.size, finalBlob.size);
+          return {
+            ok: true,
+            data: {
+              mode: 'object_url',
+              objectUrl,
+              finalUrl,
+              mimeType: resolvedMime,
+              totalBytes: finalBlob.size,
+              contentDisposition,
+            },
+          };
+        }
+
+        const reader = response.body.getReader();
+        let blobSlices: Blob[] = [];
+        let pendingChunks: Uint8Array[] = [];
+        let pendingSliceBytes = 0;
+        let lastProgressAt = performance.now();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value || value.byteLength === 0) continue;
+
+          bytesReceived += value.byteLength;
+          if (bytesReceived > maxBytes) {
+            try {
+              await reader.cancel();
+            } catch {}
+            blobSlices = [];
+            pendingChunks = [];
+            return {
+              ok: true,
+              data: {
+                mode: 'direct_url_fallback',
+                finalUrl,
+                mimeType: cleanMime || undefined,
+                contentDisposition,
+              },
+            };
+          }
+
+          pendingChunks.push(value);
+          pendingSliceBytes += value.byteLength;
+
+          if (pendingSliceBytes >= HTTP_BLOB_SLICE_FLUSH_BYTES) {
+            blobSlices.push(new Blob(pendingChunks as BlobPart[]));
+            pendingChunks = [];
+            pendingSliceBytes = 0;
+          }
+
+          const now = performance.now();
+          if (now - lastProgressAt >= PROGRESS_REPORT_THROTTLE_MS) {
+            lastProgressAt = now;
+            reportHttpProgress(tabId, itemId, transferId, bytesReceived, totalBytes);
+          }
+        }
+
+        if (pendingChunks.length > 0) {
+          blobSlices.push(new Blob(pendingChunks as BlobPart[]));
+          pendingChunks = [];
+        }
+
+        const finalBlob = new Blob(blobSlices, { type: resolvedMime });
+        blobSlices = [];
+
+        if (finalBlob.size === 0) {
+          return {
+            ok: false,
+            error: '空の動画データ (0 bytes) が返されました',
+            code: 'EMPTY_RESPONSE',
+          };
+        }
+
+        const objectUrl = URL.createObjectURL(finalBlob);
+        registerSidePanelObjectUrl(objectUrl);
+        reportHttpProgress(tabId, itemId, transferId, finalBlob.size, finalBlob.size);
+
+        return {
+          ok: true,
+          data: {
+            mode: 'object_url',
+            objectUrl,
+            finalUrl,
+            mimeType: resolvedMime,
+            totalBytes: finalBlob.size,
+            contentDisposition,
+          },
+        };
+      } catch (err: unknown) {
+        if (
+          controller.signal.aborted ||
+          (err instanceof DOMException && err.name === 'AbortError') ||
+          (err instanceof Error && err.name === 'AbortError')
+        ) {
+          return {
+            ok: false,
+            error: 'ユーザーによりキャンセルされました',
+            code: 'USER_CANCELED',
+          };
+        }
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+          code: 'NETWORK_FAILED',
+        };
+      } finally {
+        clearInterval(keepaliveTimer);
+        activeHttpControllers.delete(transferId);
+      }
+    };
 
     const finalizeToObjectUrl = (transfer: InFlightTransfer): string => {
       if (transfer.objectUrl) return transfer.objectUrl;
@@ -166,6 +404,29 @@ export function useBlobStreamBridge(): void {
         return true;
       }
 
+      if (message.type === 'PANEL_FETCH_HTTP_VIDEO_TO_OBJECT_URL') {
+        void streamHttpVideoToObjectUrl({
+          tabId: message.tabId,
+          itemId: message.itemId,
+          transferId: message.transferId,
+          url: message.url,
+          maxBytes: message.maxBytes,
+        }).then((result) => {
+          sendResponse(result);
+        });
+        return true;
+      }
+
+      if (message.type === 'PANEL_ABORT_HTTP_VIDEO_FETCH') {
+        const ctrl = activeHttpControllers.get(message.transferId);
+        if (ctrl) {
+          ctrl.abort();
+          activeHttpControllers.delete(message.transferId);
+        }
+        sendResponse({ ok: true });
+        return false;
+      }
+
       if (message.type === 'PANEL_REVOKE_OBJECT_URL') {
         if (trackedPanelObjectUrls.has(message.objectUrl)) {
           try {
@@ -190,6 +451,12 @@ export function useBlobStreamBridge(): void {
         chrome.runtime.onConnect.removeListener(handleConnect);
         chrome.runtime.onMessage.removeListener(handleRpc);
       } catch {}
+      for (const ctrl of activeHttpControllers.values()) {
+        try {
+          ctrl.abort();
+        } catch {}
+      }
+      activeHttpControllers.clear();
       for (const url of trackedPanelObjectUrls) {
         try {
           URL.revokeObjectURL(url);
