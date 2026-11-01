@@ -37,34 +37,36 @@ export const DownloadFooter: React.FC<DownloadFooterProps> = ({
     <footer
       style={{
         padding: '8px 14px',
-        backgroundColor: '#ffffff',
-        borderTop: '1px solid #e5e7eb',
+        backgroundColor: 'var(--color-bg-surface)',
+        borderTop: '1px solid var(--color-border)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         fontSize: 11,
-        color: '#4b5563',
+        color: 'var(--color-text-secondary)',
         zIndex: 10,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {active > 0 && (
-          <span style={{ color: '#2563eb', fontWeight: 600 }}>
+          <span style={{ color: 'var(--color-info-text)', fontWeight: 600 }}>
             実行中: {active}件
           </span>
         )}
         {queued > 0 && <span>待機中: {queued}件</span>}
         {completed > 0 && (
-          <span style={{ color: '#16a34a', fontWeight: 500 }}>
+          <span style={{ color: 'var(--color-success-text)', fontWeight: 500 }}>
             完了: {completed}件
           </span>
         )}
         {failed > 0 && (
-          <span style={{ color: '#dc2626', fontWeight: 600 }}>
+          <span style={{ color: 'var(--color-danger-text)', fontWeight: 600 }}>
             失敗: {failed}件
           </span>
         )}
-        {canceled > 0 && <span style={{ color: '#9ca3af' }}>キャンセル: {canceled}件</span>}
+        {canceled > 0 && (
+          <span style={{ color: 'var(--color-text-muted)' }}>キャンセル: {canceled}件</span>
+        )}
       </div>
 
       {retryableFailed > 0 && (
@@ -75,9 +77,9 @@ export const DownloadFooter: React.FC<DownloadFooterProps> = ({
             padding: '3px 8px',
             fontSize: 11,
             fontWeight: 500,
-            color: '#dc2626',
-            backgroundColor: '#fef2f2',
-            border: '1px solid #fecaca',
+            color: 'var(--color-danger-text)',
+            backgroundColor: 'var(--color-danger-subtle)',
+            border: '1px solid var(--color-danger-border)',
             borderRadius: 4,
             cursor: 'pointer',
             whiteSpace: 'nowrap',

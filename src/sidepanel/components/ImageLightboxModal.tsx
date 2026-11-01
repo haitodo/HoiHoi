@@ -277,7 +277,7 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
               cursor: 'pointer',
               fontSize: 12,
               fontWeight: 600,
-              color: isSelected ? '#a5b4fc' : '#ffffff',
+              color: isSelected ? 'var(--color-primary-text)' : '#ffffff',
             }}
           >
             <input
@@ -298,7 +298,7 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
                 padding: '5px 12px',
                 fontSize: 11,
                 fontWeight: 600,
-                backgroundColor: '#4f46e5',
+                backgroundColor: 'var(--color-primary)',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: 4,

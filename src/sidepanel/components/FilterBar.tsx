@@ -48,8 +48,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     <div
       style={{
         padding: '10px 14px',
-        backgroundColor: '#fafafa',
-        borderBottom: '1px solid #e5e7eb',
+        backgroundColor: 'var(--color-bg-subtle)',
+        borderBottom: '1px solid var(--color-border)',
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
@@ -66,9 +66,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             width: '100%',
             padding: '5px 8px',
             fontSize: 12,
-            border: '1px solid #d1d5db',
+            border: '1px solid var(--color-border-input)',
             borderRadius: 6,
             boxSizing: 'border-box',
+            backgroundColor: 'var(--color-bg-surface)',
+            color: 'var(--color-text-primary)',
           }}
         />
       </div>
@@ -76,7 +78,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
       {/* Dimension Filters & Sort Order */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 70px' }}>
-          <span style={{ fontSize: 11, color: '#666', whiteSpace: 'nowrap' }}>最小幅:</span>
+          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+            最小幅:
+          </span>
           <input
             type="number"
             min="0"
@@ -93,14 +97,18 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               width: '100%',
               padding: '4px 6px',
               fontSize: 11,
-              border: '1px solid #d1d5db',
+              border: '1px solid var(--color-border-input)',
               borderRadius: 4,
+              backgroundColor: 'var(--color-bg-surface)',
+              color: 'var(--color-text-primary)',
             }}
           />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 70px' }}>
-          <span style={{ fontSize: 11, color: '#666', whiteSpace: 'nowrap' }}>最小高:</span>
+          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+            最小高:
+          </span>
           <input
             type="number"
             min="0"
@@ -117,14 +125,18 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               width: '100%',
               padding: '4px 6px',
               fontSize: 11,
-              border: '1px solid #d1d5db',
+              border: '1px solid var(--color-border-input)',
               borderRadius: 4,
+              backgroundColor: 'var(--color-bg-surface)',
+              color: 'var(--color-text-primary)',
             }}
           />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1.2 1 125px' }}>
-          <span style={{ fontSize: 11, color: '#666', whiteSpace: 'nowrap' }}>並び順:</span>
+          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+            並び順:
+          </span>
           <select
             value={sortOrder}
             onChange={(e) => onSortChange(e.target.value as SortOrder)}
@@ -132,10 +144,10 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               width: '100%',
               padding: '4px 6px',
               fontSize: 11,
-              border: '1px solid #d1d5db',
+              border: '1px solid var(--color-border-input)',
               borderRadius: 4,
-              backgroundColor: '#ffffff',
-              color: '#374151',
+              backgroundColor: 'var(--color-bg-surface)',
+              color: 'var(--color-text-primary)',
               cursor: 'pointer',
               fontWeight: 500,
             }}
@@ -175,9 +187,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                   padding: '2px 8px',
                   borderRadius: 12,
                   border: '1px solid',
-                  borderColor: selected ? '#4f46e5' : '#d1d5db',
-                  backgroundColor: selected ? '#4f46e5' : '#ffffff',
-                  color: selected ? '#ffffff' : '#374151',
+                  borderColor: selected ? 'var(--color-primary)' : 'var(--color-border-input)',
+                  backgroundColor: selected ? 'var(--color-primary)' : 'var(--color-bg-surface)',
+                  color: selected ? '#ffffff' : 'var(--color-text-secondary)',
                   cursor: 'pointer',
                   fontWeight: selected ? 600 : 400,
                 }}
@@ -194,7 +206,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             onClick={onReset}
             style={{
               fontSize: 11,
-              color: '#6b7280',
+              color: 'var(--color-text-muted)',
               background: 'none',
               border: 'none',
               padding: '2px 4px',
@@ -214,11 +226,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         <div
           style={{
             fontSize: 11,
-            backgroundColor: '#fffbeb',
-            border: '1px solid #fef3c7',
+            backgroundColor: 'var(--color-warning-subtle)',
+            border: '1px solid var(--color-warning-border)',
             padding: '4px 8px',
             borderRadius: 4,
-            color: '#92400e',
+            color: 'var(--color-warning-banner-text)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',

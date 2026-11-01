@@ -30,8 +30,8 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
     <div
       style={{
         padding: '8px 10px',
-        backgroundColor: '#ffffff',
-        borderBottom: '1px solid #e5e7eb',
+        backgroundColor: 'var(--color-bg-surface)',
+        borderBottom: '1px solid var(--color-border)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -43,11 +43,11 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontWeight: 600, color: '#111827' }}>
+          <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
             選択中: {selectedCount} 件
           </span>
           {hiddenSelectedCount > 0 && (
-            <span style={{ color: '#d97706', fontSize: 11 }}>
+            <span style={{ color: 'var(--color-warning-text)', fontSize: 11 }}>
               (非表示 {hiddenSelectedCount}件)
             </span>
           )}
@@ -58,9 +58,9 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
             style={{
               display: 'inline-flex',
               borderRadius: 4,
-              border: '1px solid #d1d5db',
+              border: '1px solid var(--color-border-input)',
               overflow: 'hidden',
-              backgroundColor: '#ffffff',
+              backgroundColor: 'var(--color-bg-surface)',
             }}
           >
             <button
@@ -69,10 +69,10 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
               style={{
                 padding: '2px 7px',
                 fontSize: 10,
-                backgroundColor: cardSize === 'auto' ? '#4f46e5' : '#ffffff',
-                color: cardSize === 'auto' ? '#ffffff' : '#4b5563',
+                backgroundColor: cardSize === 'auto' ? 'var(--color-primary)' : 'var(--color-bg-surface)',
+                color: cardSize === 'auto' ? '#ffffff' : 'var(--color-text-secondary)',
                 border: 'none',
-                borderRight: '1px solid #d1d5db',
+                borderRight: '1px solid var(--color-border-input)',
                 cursor: 'pointer',
                 fontWeight: cardSize === 'auto' ? 600 : 400,
                 whiteSpace: 'nowrap',
@@ -87,10 +87,10 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
               style={{
                 padding: '2px 6px',
                 fontSize: 10,
-                backgroundColor: cardSize === 'small' ? '#4f46e5' : '#ffffff',
-                color: cardSize === 'small' ? '#ffffff' : '#4b5563',
+                backgroundColor: cardSize === 'small' ? 'var(--color-primary)' : 'var(--color-bg-surface)',
+                color: cardSize === 'small' ? '#ffffff' : 'var(--color-text-secondary)',
                 border: 'none',
-                borderRight: '1px solid #d1d5db',
+                borderRight: '1px solid var(--color-border-input)',
                 cursor: 'pointer',
                 fontWeight: cardSize === 'small' ? 600 : 400,
                 whiteSpace: 'nowrap',
@@ -105,10 +105,10 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
               style={{
                 padding: '2px 6px',
                 fontSize: 10,
-                backgroundColor: cardSize === 'medium' ? '#4f46e5' : '#ffffff',
-                color: cardSize === 'medium' ? '#ffffff' : '#4b5563',
+                backgroundColor: cardSize === 'medium' ? 'var(--color-primary)' : 'var(--color-bg-surface)',
+                color: cardSize === 'medium' ? '#ffffff' : 'var(--color-text-secondary)',
                 border: 'none',
-                borderRight: '1px solid #d1d5db',
+                borderRight: '1px solid var(--color-border-input)',
                 cursor: 'pointer',
                 fontWeight: cardSize === 'medium' ? 600 : 400,
                 whiteSpace: 'nowrap',
@@ -123,8 +123,8 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
               style={{
                 padding: '2px 6px',
                 fontSize: 10,
-                backgroundColor: cardSize === 'large' ? '#4f46e5' : '#ffffff',
-                color: cardSize === 'large' ? '#ffffff' : '#4b5563',
+                backgroundColor: cardSize === 'large' ? 'var(--color-primary)' : 'var(--color-bg-surface)',
+                color: cardSize === 'large' ? '#ffffff' : 'var(--color-text-secondary)',
                 border: 'none',
                 cursor: 'pointer',
                 fontWeight: cardSize === 'large' ? 600 : 400,
@@ -146,10 +146,10 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
             style={{
               padding: '3px 8px',
               fontSize: 11,
-              border: '1px solid #c7d2fe',
+              border: '1px solid var(--color-primary-subtle-border)',
               borderRadius: 4,
-              backgroundColor: '#eef2ff',
-              color: '#4338ca',
+              backgroundColor: 'var(--color-primary-subtle)',
+              color: 'var(--color-primary-text)',
               cursor: 'pointer',
               fontWeight: 500,
             }}
@@ -166,9 +166,10 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
           style={{
             padding: '3px 8px',
             fontSize: 11,
-            border: '1px solid #d1d5db',
+            border: '1px solid var(--color-border-input)',
             borderRadius: 4,
-            backgroundColor: '#f9fafb',
+            backgroundColor: 'var(--color-bg-subtle)',
+            color: 'var(--color-text-primary)',
             cursor: visibleCount === 0 ? 'not-allowed' : 'pointer',
           }}
           title="現在フィルターされて画面に表示されている画像をすべて選択します"
@@ -183,9 +184,10 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
           style={{
             padding: '3px 8px',
             fontSize: 11,
-            border: '1px solid #d1d5db',
+            border: '1px solid var(--color-border-input)',
             borderRadius: 4,
-            backgroundColor: '#f9fafb',
+            backgroundColor: 'var(--color-bg-subtle)',
+            color: 'var(--color-text-primary)',
             cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
           }}
           title="すべての選択を解除します（非表示中の選択も含む）"
@@ -203,8 +205,8 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
             fontWeight: 600,
             border: 'none',
             borderRadius: 4,
-            backgroundColor: selectedCount > 0 ? '#4f46e5' : '#e5e7eb',
-            color: selectedCount > 0 ? '#ffffff' : '#9ca3af',
+            backgroundColor: selectedCount > 0 ? 'var(--color-primary)' : 'var(--color-bg-subtle)',
+            color: selectedCount > 0 ? '#ffffff' : 'var(--color-text-muted)',
             cursor: selectedCount > 0 ? 'pointer' : 'not-allowed',
           }}
         >

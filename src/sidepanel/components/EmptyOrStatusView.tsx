@@ -32,7 +32,7 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
             marginTop: 14,
             padding: '8px 18px',
             fontSize: 13,
-            backgroundColor: '#4f46e5',
+            backgroundColor: 'var(--color-primary)',
             color: '#ffffff',
             border: 'none',
             borderRadius: 6,
@@ -63,7 +63,7 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
             marginTop: 12,
             padding: '6px 14px',
             fontSize: 12,
-            backgroundColor: '#4f46e5',
+            backgroundColor: 'var(--color-primary)',
             color: '#ffffff',
             border: 'none',
             borderRadius: 6,
@@ -86,9 +86,9 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
             marginTop: 12,
             padding: '5px 12px',
             fontSize: 12,
-            backgroundColor: '#f3f4f6',
-            color: '#374151',
-            border: '1px solid #d1d5db',
+            backgroundColor: 'var(--color-bg-subtle)',
+            color: 'var(--color-text-primary)',
+            border: '1px solid var(--color-border-input)',
             borderRadius: 6,
             cursor: 'pointer',
           }}
@@ -116,13 +116,28 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
         justifyContent: 'center',
         padding: 30,
         textAlign: 'center',
-        color: '#6b7280',
+        color: 'var(--color-text-muted)',
       }}
     >
-      <h3 style={{ fontSize: 14, fontWeight: 600, color: '#374151', margin: '0 0 8px' }}>
+      <h3
+        style={{
+          fontSize: 14,
+          fontWeight: 600,
+          color: 'var(--color-text-primary)',
+          margin: '0 0 8px',
+        }}
+      >
         {title}
       </h3>
-      <p style={{ fontSize: 12, lineHeight: 1.5, margin: 0, maxWidth: 300 }}>
+      <p
+        style={{
+          fontSize: 12,
+          lineHeight: 1.5,
+          margin: 0,
+          maxWidth: 300,
+          color: 'var(--color-text-secondary)',
+        }}
+      >
         {description}
       </p>
       {action}

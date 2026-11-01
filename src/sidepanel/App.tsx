@@ -315,7 +315,8 @@ export function App() {
         margin: 0,
         padding: 0,
         boxSizing: 'border-box',
-        backgroundColor: '#f9fafb',
+        backgroundColor: 'var(--color-bg-app)',
+        color: 'var(--color-text-primary)',
         fontFamily:
           '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
         overflow: 'hidden',

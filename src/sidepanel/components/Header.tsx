@@ -26,8 +26,8 @@ export const Header: React.FC<HeaderProps> = ({
     <header
       style={{
         padding: '10px 14px',
-        borderBottom: '1px solid #e0e0e0',
-        backgroundColor: '#ffffff',
+        borderBottom: '1px solid var(--color-border)',
+        backgroundColor: 'var(--color-bg-surface)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -43,7 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
             style={{
               fontWeight: 600,
               fontSize: 13,
-              color: '#1a1a1a',
+              color: 'var(--color-text-primary)',
               maxWidth: 180,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -58,8 +58,9 @@ export const Header: React.FC<HeaderProps> = ({
               fontSize: 11,
               padding: '1px 6px',
               borderRadius: 10,
-              backgroundColor: '#eef2ff',
-              color: '#4338ca',
+              backgroundColor: 'var(--color-primary-subtle)',
+              color: 'var(--color-primary-text)',
+              border: '1px solid var(--color-primary-subtle-border)',
               fontWeight: 500,
             }}
           >
@@ -67,7 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </div>
 
-        <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>
           {scanStatus === 'scanning' && 'スキャン中...'}
           {scanStatus === 'watching' && '監視中 (スクロールで自動追加)'}
           {scanStatus === 'limit_reached' && '上限到達 (2,000件)'}
@@ -85,10 +86,16 @@ export const Header: React.FC<HeaderProps> = ({
               padding: '4px 8px',
               fontSize: 12,
               fontWeight: 500,
-              border: isPinned ? '1px solid #6366f1' : '1px solid #d1d5db',
+              border: isPinned
+                ? '1px solid var(--color-primary)'
+                : '1px solid var(--color-border-input)',
               borderRadius: 6,
-              backgroundColor: isPinned ? '#eef2ff' : '#ffffff',
-              color: isPinned ? '#4338ca' : '#4b5563',
+              backgroundColor: isPinned
+                ? 'var(--color-primary-subtle)'
+                : 'var(--color-bg-surface)',
+              color: isPinned
+                ? 'var(--color-primary-text)'
+                : 'var(--color-text-secondary)',
               cursor: 'pointer',
               whiteSpace: 'nowrap',
               display: 'flex',
@@ -112,9 +119,10 @@ export const Header: React.FC<HeaderProps> = ({
             padding: '4px 10px',
             fontSize: 12,
             fontWeight: 500,
-            border: '1px solid #d1d5db',
+            border: '1px solid var(--color-border-input)',
             borderRadius: 6,
-            backgroundColor: '#f9fafb',
+            backgroundColor: 'var(--color-bg-subtle)',
+            color: 'var(--color-text-primary)',
             cursor: scanStatus === 'scanning' ? 'not-allowed' : 'pointer',
             whiteSpace: 'nowrap',
           }}

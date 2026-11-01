@@ -73,9 +73,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         onOpenPreview?.();
       }}
       style={{
-        border: `2px solid ${isSelected ? '#4f46e5' : '#e5e7eb'}`,
+        border: `2px solid ${isSelected ? 'var(--color-primary)' : 'var(--color-border)'}`,
         borderRadius: 8,
-        backgroundColor: '#ffffff',
+        backgroundColor: 'var(--color-card-bg)',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
@@ -93,11 +93,13 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           top: 6,
           left: 6,
           zIndex: 2,
-          backgroundColor: 'rgba(255, 255, 255, 0.9)',
+          backgroundColor: 'var(--color-overlay-bg)',
+          border: '1px solid var(--color-overlay-border)',
           borderRadius: 4,
           padding: '2px 4px',
           display: 'flex',
           alignItems: 'center',
+          backdropFilter: 'blur(4px)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -122,8 +124,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             top: 6,
             right: item.occurrenceCount > 1 ? 38 : 6,
             zIndex: 3,
-            backgroundColor: 'rgba(255, 255, 255, 0.92)',
-            border: '1px solid rgba(0, 0, 0, 0.12)',
+            backgroundColor: 'var(--color-overlay-bg)',
+            border: '1px solid var(--color-overlay-border)',
+            color: 'var(--color-text-primary)',
             borderRadius: 4,
             padding: '2px 5px',
             fontSize: 10,
@@ -132,7 +135,8 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.12)',
+            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.2)',
+            backdropFilter: 'blur(4px)',
           }}
           title="クリックで拡大プレビューを開く（ダブルクリックでも可）"
         >
@@ -200,7 +204,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         style={{
           width: '100%',
           height: thumbnailHeight,
-          backgroundColor: '#f3f4f6',
+          backgroundColor: 'var(--color-thumb-bg)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -213,7 +217,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             style={{
               padding: 8,
               textAlign: 'center',
-              color: '#9ca3af',
+              color: 'var(--color-text-muted)',
               fontSize: 10,
               wordBreak: 'break-all',
             }}
@@ -257,7 +261,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         style={{
           padding: cardSize === 'small' ? '4px 6px' : '6px 8px',
           fontSize: 11,
-          backgroundColor: '#ffffff',
+          backgroundColor: 'var(--color-card-bg)',
           display: 'flex',
           flexDirection: 'column',
           flex: 1,
@@ -273,7 +277,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              color: '#4b5563',
+              color: 'var(--color-text-muted)',
               fontSize: cardSize === 'small' ? 9 : 10,
               marginBottom: 4,
               whiteSpace: 'nowrap',
@@ -294,6 +298,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             <span
               style={{
                 fontWeight: 600,
+                color: 'var(--color-text-primary)',
                 marginLeft: 4,
                 flexShrink: 0,
                 whiteSpace: 'nowrap',
@@ -313,9 +318,10 @@ export const ImageCard: React.FC<ImageCardProps> = ({
                   width: '100%',
                   fontSize: cardSize === 'small' ? 9 : 10,
                   padding: '1px 3px',
-                  border: '1px solid #d1d5db',
+                  border: '1px solid var(--color-border-input)',
                   borderRadius: 4,
-                  backgroundColor: '#ffffff',
+                  backgroundColor: 'var(--color-bg-surface)',
+                  color: 'var(--color-text-primary)',
                   cursor: 'pointer',
                 }}
               >
@@ -361,9 +367,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
                   minWidth: 0,
                   padding: '3px 2px',
                   fontSize: 10,
-                  backgroundColor: '#eef2ff',
-                  color: '#4338ca',
-                  border: '1px solid #c7d2fe',
+                  backgroundColor: 'var(--color-primary-subtle)',
+                  color: 'var(--color-primary-text)',
+                  border: '1px solid var(--color-primary-subtle-border)',
                   borderRadius: 4,
                   cursor: 'pointer',
                   fontWeight: 600,
@@ -384,9 +390,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
                   flexShrink: 0,
                   padding: '3px 6px',
                   fontSize: 10,
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
+                  backgroundColor: 'var(--color-bg-subtle)',
+                  color: 'var(--color-text-primary)',
+                  border: '1px solid var(--color-border-input)',
                   borderRadius: 4,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
@@ -408,9 +414,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
                   minWidth: 0,
                   padding: '5px 8px',
                   fontSize: 11,
-                  backgroundColor: '#eef2ff',
-                  color: '#4338ca',
-                  border: '1px solid #c7d2fe',
+                  backgroundColor: 'var(--color-primary-subtle)',
+                  color: 'var(--color-primary-text)',
+                  border: '1px solid var(--color-primary-subtle-border)',
                   borderRadius: 4,
                   cursor: 'pointer',
                   fontWeight: 600,
@@ -434,9 +440,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
                     flexShrink: 0,
                     padding: '5px 8px',
                     fontSize: 11,
-                    backgroundColor: '#f3f4f6',
-                    color: '#374151',
-                    border: '1px solid #d1d5db',
+                    backgroundColor: 'var(--color-bg-subtle)',
+                    color: 'var(--color-text-primary)',
+                    border: '1px solid var(--color-border-input)',
                     borderRadius: 4,
                     cursor: 'pointer',
                     whiteSpace: 'nowrap',
@@ -454,9 +460,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
                   flexShrink: 0,
                   padding: '5px 8px',
                   fontSize: 11,
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
+                  backgroundColor: 'var(--color-bg-subtle)',
+                  color: 'var(--color-text-primary)',
+                  border: '1px solid var(--color-border-input)',
                   borderRadius: 4,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
@@ -473,9 +479,15 @@ export const ImageCard: React.FC<ImageCardProps> = ({
                   flexShrink: 0,
                   padding: '5px 8px',
                   fontSize: 11,
-                  backgroundColor: copied ? '#dcfce7' : '#f3f4f6',
-                  color: copied ? '#166534' : '#374151',
-                  border: '1px solid #d1d5db',
+                  backgroundColor: copied
+                    ? 'var(--color-success-subtle)'
+                    : 'var(--color-bg-subtle)',
+                  color: copied
+                    ? 'var(--color-success-text)'
+                    : 'var(--color-text-primary)',
+                  border: copied
+                    ? '1px solid var(--color-success-border)'
+                    : '1px solid var(--color-border-input)',
                   borderRadius: 4,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
@@ -496,9 +508,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
                   minWidth: 0,
                   padding: '3px 4px',
                   fontSize: 10,
-                  backgroundColor: '#eef2ff',
-                  color: '#4338ca',
-                  border: '1px solid #c7d2fe',
+                  backgroundColor: 'var(--color-primary-subtle)',
+                  color: 'var(--color-primary-text)',
+                  border: '1px solid var(--color-primary-subtle-border)',
                   borderRadius: 4,
                   cursor: 'pointer',
                   fontWeight: 600,
@@ -519,9 +531,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
                   flexShrink: 0,
                   padding: '3px 6px',
                   fontSize: 10,
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
+                  backgroundColor: 'var(--color-bg-subtle)',
+                  color: 'var(--color-text-primary)',
+                  border: '1px solid var(--color-border-input)',
                   borderRadius: 4,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
@@ -539,9 +551,15 @@ export const ImageCard: React.FC<ImageCardProps> = ({
                   flexShrink: 0,
                   padding: '3px 6px',
                   fontSize: 10,
-                  backgroundColor: copied ? '#dcfce7' : '#f3f4f6',
-                  color: copied ? '#166534' : '#374151',
-                  border: '1px solid #d1d5db',
+                  backgroundColor: copied
+                    ? 'var(--color-success-subtle)'
+                    : 'var(--color-bg-subtle)',
+                  color: copied
+                    ? 'var(--color-success-text)'
+                    : 'var(--color-text-primary)',
+                  border: copied
+                    ? '1px solid var(--color-success-border)'
+                    : '1px solid var(--color-border-input)',
                   borderRadius: 4,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
