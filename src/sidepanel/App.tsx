@@ -18,6 +18,45 @@ const DEFAULT_FILTER: FilterState = {
   includeUnknownDimensions: false,
 };
 
+const FILTER_PREFS_KEY = 'wic_filter_preferences';
+
+interface SavedFilterPreferences {
+  minWidth: number | null;
+  minHeight: number | null;
+  formats: FilterState['formats'];
+  includeUnknownDimensions: boolean;
+}
+
+function loadSavedFilterPreferences(): Partial<FilterState> {
+  try {
+    const raw = localStorage.getItem(FILTER_PREFS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        minWidth:
+          typeof parsed.minWidth === 'number' && parsed.minWidth > 0 ? parsed.minWidth : null,
+        minHeight:
+          typeof parsed.minHeight === 'number' && parsed.minHeight > 0 ? parsed.minHeight : null,
+        formats: Array.isArray(parsed.formats) ? parsed.formats : [],
+        includeUnknownDimensions: Boolean(parsed.includeUnknownDimensions),
+      };
+    }
+  } catch {}
+  return {};
+}
+
+function saveFilterPreferences(filter: FilterState): void {
+  try {
+    const prefs: SavedFilterPreferences = {
+      minWidth: filter.minWidth,
+      minHeight: filter.minHeight,
+      formats: filter.formats,
+      includeUnknownDimensions: filter.includeUnknownDimensions,
+    };
+    localStorage.setItem(FILTER_PREFS_KEY, JSON.stringify(prefs));
+  } catch {}
+}
+
 export function App() {
   const { activeTabId, isPinned, togglePin } = useActiveTabId();
   const {
@@ -33,7 +72,26 @@ export function App() {
     retryFailedDownloads,
   } = useTabSession(activeTabId);
 
-  const [filter, setFilter] = useState<FilterState>(DEFAULT_FILTER);
+  const [filter, setFilterState] = useState<FilterState>(() => {
+    const saved = loadSavedFilterPreferences();
+    return {
+      urlQuery: '', // transient per inspection
+      minWidth: saved.minWidth ?? null,
+      minHeight: saved.minHeight ?? null,
+      formats: saved.formats ?? [],
+      includeUnknownDimensions: saved.includeUnknownDimensions ?? false,
+    };
+  });
+
+  const handleFilterChange = useCallback((nextFilter: FilterState) => {
+    setFilterState(nextFilter);
+    saveFilterPreferences(nextFilter);
+  }, []);
+
+  const handleResetFilter = useCallback(() => {
+    setFilterState(DEFAULT_FILTER);
+    saveFilterPreferences(DEFAULT_FILTER);
+  }, []);
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => {
     try {
       const saved = localStorage.getItem('wic_sort_order');
@@ -245,9 +303,10 @@ export function App() {
         <>
           <FilterBar
             filter={filter}
-            onChange={setFilter}
+            onChange={handleFilterChange}
             sortOrder={sortOrder}
             onSortChange={handleSortChange}
+            onReset={handleResetFilter}
             unknownDimensionsCount={unknownDimensionsCount}
           />
 
@@ -269,7 +328,7 @@ export function App() {
           scanStatus={scanStatus}
           statusMessage={snapshot?.statusMessage}
           isFilterEmpty={rawItems.length > 0 && filteredItems.length === 0}
-          onClearFilter={() => setFilter(DEFAULT_FILTER)}
+          onClearFilter={handleResetFilter}
           onRescan={triggerRescan}
         />
       ) : (

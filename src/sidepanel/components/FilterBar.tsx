@@ -6,6 +6,7 @@ interface FilterBarProps {
   onChange: (next: FilterState) => void;
   sortOrder: SortOrder;
   onSortChange: (order: SortOrder) => void;
+  onReset?: () => void;
   unknownDimensionsCount: number;
 }
 
@@ -24,6 +25,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onChange,
   sortOrder,
   onSortChange,
+  onReset,
   unknownDimensionsCount,
 }) => {
   const toggleFormat = (fmt: ImageFormat) => {
@@ -35,6 +37,12 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   };
 
   const hasDimensionFilter = (filter.minWidth ?? 0) > 0 || (filter.minHeight ?? 0) > 0;
+  const isFilterActive = Boolean(
+    filter.urlQuery ||
+      hasDimensionFilter ||
+      filter.formats.length > 0 ||
+      filter.includeUnknownDimensions,
+  );
 
   return (
     <div
@@ -144,31 +152,61 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         </div>
       </div>
 
-      {/* Format Chips */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-        {AVAILABLE_FORMATS.map((f) => {
-          const selected = filter.formats.includes(f.value);
-          return (
-            <button
-              key={f.value}
-              type="button"
-              onClick={() => toggleFormat(f.value)}
-              style={{
-                fontSize: 11,
-                padding: '2px 8px',
-                borderRadius: 12,
-                border: '1px solid',
-                borderColor: selected ? '#4f46e5' : '#d1d5db',
-                backgroundColor: selected ? '#4f46e5' : '#ffffff',
-                color: selected ? '#ffffff' : '#374151',
-                cursor: 'pointer',
-                fontWeight: selected ? 600 : 400,
-              }}
-            >
-              {f.label}
-            </button>
-          );
-        })}
+      {/* Format Chips & Reset */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 6,
+        }}
+      >
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {AVAILABLE_FORMATS.map((f) => {
+            const selected = filter.formats.includes(f.value);
+            return (
+              <button
+                key={f.value}
+                type="button"
+                onClick={() => toggleFormat(f.value)}
+                style={{
+                  fontSize: 11,
+                  padding: '2px 8px',
+                  borderRadius: 12,
+                  border: '1px solid',
+                  borderColor: selected ? '#4f46e5' : '#d1d5db',
+                  backgroundColor: selected ? '#4f46e5' : '#ffffff',
+                  color: selected ? '#ffffff' : '#374151',
+                  cursor: 'pointer',
+                  fontWeight: selected ? 600 : 400,
+                }}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {onReset && isFilterActive && (
+          <button
+            type="button"
+            onClick={onReset}
+            style={{
+              fontSize: 11,
+              color: '#6b7280',
+              background: 'none',
+              border: 'none',
+              padding: '2px 4px',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              whiteSpace: 'nowrap',
+            }}
+            title="すべてのフィルター条件（検索・幅・高さ・形式）をリセットします"
+          >
+            条件リセット
+          </button>
+        )}
       </div>
 
       {/* Unknown Dimension Banner (MVP-11) */}
