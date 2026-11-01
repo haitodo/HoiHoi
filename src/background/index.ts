@@ -51,29 +51,34 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     }
 
     void (async () => {
-      await sessionStore.ensureHydrated();
+      try {
+        await sessionStore.ensureHydrated();
 
-      switch (message.type) {
-        case 'CONTENT_SCAN_BATCH': {
-          sessionStore.mergeCandidateGroups(tabId, message.scanEpoch, message.groups);
-          sendResponse({ ok: true });
-          break;
+        switch (message.type) {
+          case 'CONTENT_SCAN_BATCH': {
+            sessionStore.mergeCandidateGroups(tabId, message.scanEpoch, message.groups);
+            sendResponse({ ok: true });
+            break;
+          }
+          case 'CONTENT_SCAN_STATUS': {
+            sessionStore.setScanStatus(tabId, message.status);
+            sendResponse({ ok: true });
+            break;
+          }
+          case 'CONTENT_IMAGE_LOADED_DIMENSIONS': {
+            sessionStore.updateItemDimensions(
+              tabId,
+              message.url,
+              message.naturalWidth,
+              message.naturalHeight,
+            );
+            sendResponse({ ok: true });
+            break;
+          }
         }
-        case 'CONTENT_SCAN_STATUS': {
-          sessionStore.setScanStatus(tabId, message.status);
-          sendResponse({ ok: true });
-          break;
-        }
-        case 'CONTENT_IMAGE_LOADED_DIMENSIONS': {
-          sessionStore.updateItemDimensions(
-            tabId,
-            message.url,
-            message.naturalWidth,
-            message.naturalHeight,
-          );
-          sendResponse({ ok: true });
-          break;
-        }
+      } catch (err) {
+        console.error('[WIC BG] Error handling content message:', err);
+        sendResponse({ ok: false, error: String(err) });
       }
     })();
 
@@ -82,76 +87,81 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 
   if (isPanelToBgMessage(message)) {
     void (async () => {
-      await sessionStore.ensureHydrated();
-      let tabId = message.tabId;
+      try {
+        await sessionStore.ensureHydrated();
+        let tabId = message.tabId;
 
-      // Fallback: If tabId is invalid or <= 0, query active tab directly from Background
-      if (!tabId || tabId <= 0) {
-        try {
-          const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-          if (activeTab?.id !== undefined) {
-            tabId = activeTab.id;
+        // Fallback: If tabId is invalid or <= 0, query active tab directly from Background
+        if (!tabId || tabId <= 0) {
+          try {
+            const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+            if (activeTab?.id !== undefined) {
+              tabId = activeTab.id;
+            }
+          } catch {}
+        }
+
+        switch (message.type) {
+          case 'PANEL_GET_TAB_SESSION': {
+            let snapshot = sessionStore.getSnapshot(tabId);
+            // If session was unscanned and pageUrl is empty, try populating current tab info
+            if (snapshot.scanStatus === 'unscanned' && !snapshot.pageUrl && tabId > 0) {
+              try {
+                const tab = await chrome.tabs.get(tabId);
+                if (tab.url) {
+                  const session = sessionStore.getOrCreateSession(tabId, tab.url);
+                  snapshot = sessionStore.getSnapshot(tabId);
+                }
+              } catch {}
+            }
+            sendResponse({ ok: true, data: snapshot });
+            break;
           }
-        } catch {}
-      }
 
-      switch (message.type) {
-        case 'PANEL_GET_TAB_SESSION': {
-          let snapshot = sessionStore.getSnapshot(tabId);
-          // If session was unscanned and pageUrl is empty, try populating current tab info
-          if (snapshot.scanStatus === 'unscanned' && !snapshot.pageUrl && tabId > 0) {
-            try {
-              const tab = await chrome.tabs.get(tabId);
-              if (tab.url) {
-                const session = sessionStore.getOrCreateSession(tabId, tab.url);
-                snapshot = sessionStore.getSnapshot(tabId);
-              }
-            } catch {}
+          case 'PANEL_TRIGGER_RESCAN': {
+            const ok = await triggerTabRescan(tabId);
+            sendResponse({ ok });
+            break;
           }
-          sendResponse({ ok: true, data: snapshot });
-          break;
-        }
 
-        case 'PANEL_TRIGGER_RESCAN': {
-          const ok = await triggerTabRescan(tabId);
-          sendResponse({ ok });
-          break;
-        }
+          case 'PANEL_UPDATE_SELECTION': {
+            const selectedIds = sessionStore.updateSelection(tabId, message.mutation);
+            sendResponse({ ok: true, data: selectedIds });
+            break;
+          }
 
-        case 'PANEL_UPDATE_SELECTION': {
-          const selectedIds = sessionStore.updateSelection(tabId, message.mutation);
-          sendResponse({ ok: true, data: selectedIds });
-          break;
-        }
+          case 'PANEL_SELECT_VARIANT': {
+            const ok = sessionStore.selectVariant(tabId, message.itemId, message.variantUrl);
+            sendResponse({ ok });
+            break;
+          }
 
-        case 'PANEL_SELECT_VARIANT': {
-          const ok = sessionStore.selectVariant(tabId, message.itemId, message.variantUrl);
-          sendResponse({ ok });
-          break;
-        }
+          case 'PANEL_REPORT_THUMB_DIMENSIONS': {
+            sessionStore.updateItemDimensions(
+              tabId,
+              message.variantUrl,
+              message.naturalWidth,
+              message.naturalHeight,
+            );
+            sendResponse({ ok: true });
+            break;
+          }
 
-        case 'PANEL_REPORT_THUMB_DIMENSIONS': {
-          sessionStore.updateItemDimensions(
-            tabId,
-            message.variantUrl,
-            message.naturalWidth,
-            message.naturalHeight,
-          );
-          sendResponse({ ok: true });
-          break;
-        }
+          case 'PANEL_ENQUEUE_DOWNLOADS': {
+            downloadManager.enqueue(tabId, message.itemIds);
+            sendResponse({ ok: true });
+            break;
+          }
 
-        case 'PANEL_ENQUEUE_DOWNLOADS': {
-          downloadManager.enqueue(tabId, message.itemIds);
-          sendResponse({ ok: true });
-          break;
+          case 'PANEL_RETRY_FAILED_DOWNLOADS': {
+            downloadManager.retryFailed(tabId, message.itemIds);
+            sendResponse({ ok: true });
+            break;
+          }
         }
-
-        case 'PANEL_RETRY_FAILED_DOWNLOADS': {
-          downloadManager.retryFailed(tabId, message.itemIds);
-          sendResponse({ ok: true });
-          break;
-        }
+      } catch (err) {
+        console.error('[WIC BG] Error handling panel message:', err);
+        sendResponse({ ok: false, error: String(err) });
       }
     })();
 

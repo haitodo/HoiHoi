@@ -37,7 +37,7 @@ export class SessionStore {
   private sessions = new Map<number, InternalTabSession>();
   private hydrated = false;
   private hydratePromise: Promise<void> | null = null;
-  private persistTimer: number | null = null;
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private persistQueue = Promise.resolve();
   private eventListeners: Array<(event: BackgroundToPanelEvent) => void> = [];
 
@@ -484,7 +484,7 @@ export class SessionStore {
   private schedulePersist(): void {
     if (this.persistTimer !== null) return;
 
-    this.persistTimer = window.setTimeout(() => {
+    this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
       this.persistQueue = this.persistQueue.then(async () => {
         const toSave: Record<string, TabSessionSnapshot> = {};
