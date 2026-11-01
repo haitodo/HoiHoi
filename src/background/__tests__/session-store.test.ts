@@ -24,19 +24,19 @@ describe('SessionStore', () => {
     const tabId = 101;
     const groups: RawCandidateGroup[] = [
       {
-        occurrenceKey: 'el_1::img::https://pic.xascdn.li/thumb.jpg',
-        primaryUrl: 'https://pic.xascdn.li/thumb.jpg',
+        occurrenceKey: 'el_1::img::https://cdn.example.com/gallery/thumb.jpg',
+        primaryUrl: 'https://cdn.example.com/gallery/thumb.jpg',
         domOrder: 1,
         variants: [
           {
-            url: 'https://pic.xascdn.li/thumb.jpg',
+            url: 'https://cdn.example.com/gallery/thumb.jpg',
             role: 'lazy-attr',
             source: 'lazy-attr',
             naturalWidth: null,
             naturalHeight: null,
           },
           {
-            url: 'https://www.xasiat.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
+            url: 'https://images.example.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
             role: 'link-target',
             source: 'link-href',
             naturalWidth: null,
@@ -51,10 +51,10 @@ describe('SessionStore', () => {
     const snapshot = store.getSnapshot(tabId);
     expect(snapshot.items).toHaveLength(1);
     const item = snapshot.items[0]!;
-    expect(item.primaryUrl).toBe('https://pic.xascdn.li/thumb.jpg');
+    expect(item.primaryUrl).toBe('https://cdn.example.com/gallery/thumb.jpg');
     // Crucial check: selectedUrl should be the high-resolution link-target URL!
     expect(item.selectedUrl).toBe(
-      'https://www.xasiat.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
+      'https://images.example.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
     );
     expect(item.variants).toHaveLength(2);
   });
@@ -63,19 +63,19 @@ describe('SessionStore', () => {
     const tabId = 102;
     const initialGroups: RawCandidateGroup[] = [
       {
-        occurrenceKey: 'el_1::img::https://pic.xascdn.li/thumb.jpg',
-        primaryUrl: 'https://pic.xascdn.li/thumb.jpg',
+        occurrenceKey: 'el_1::img::https://cdn.example.com/gallery/thumb.jpg',
+        primaryUrl: 'https://cdn.example.com/gallery/thumb.jpg',
         domOrder: 1,
         variants: [
           {
-            url: 'https://pic.xascdn.li/thumb.jpg',
+            url: 'https://cdn.example.com/gallery/thumb.jpg',
             role: 'lazy-attr',
             source: 'lazy-attr',
             naturalWidth: null,
             naturalHeight: null,
           },
           {
-            url: 'https://www.xasiat.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
+            url: 'https://images.example.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
             role: 'link-target',
             source: 'link-href',
             naturalWidth: null,
@@ -91,12 +91,12 @@ describe('SessionStore', () => {
     // Now simulate user clicking the thumbnail, modal opens and adds <img> to DOM
     const modalGroups: RawCandidateGroup[] = [
       {
-        occurrenceKey: 'el_99::img::https://www.xasiat.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
-        primaryUrl: 'https://www.xasiat.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
+        occurrenceKey: 'el_99::img::https://images.example.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
+        primaryUrl: 'https://images.example.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
         domOrder: 99,
         variants: [
           {
-            url: 'https://www.xasiat.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
+            url: 'https://images.example.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
             role: 'current-src',
             source: 'img',
             naturalWidth: 1200,
@@ -114,7 +114,7 @@ describe('SessionStore', () => {
     const item = snapshot.items[0]!;
     // And natural dimensions from modal are merged in!
     const fullVar = item.variants.find(
-      (v) => v.url === 'https://www.xasiat.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
+      (v) => v.url === 'https://images.example.com/get_image/2/sources/38344/photo.jpg/?i-acctoken=abc',
     );
     expect(fullVar?.naturalWidth).toBe(1200);
     expect(fullVar?.naturalHeight).toBe(1800);

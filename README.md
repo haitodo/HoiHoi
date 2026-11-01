@@ -29,9 +29,31 @@ pnpm build
 
 # 単体テストの実行 (Vitest)
 pnpm test
+
+# 拡張機能のパッケージ化 (CRX / ZIP 生成 & 拡張機能ID固定化)
+pnpm package
+# または Windows エクスプローラーで package.bat をダブルクリック
 ```
 
-### Chrome への読み込み方法
+### パッケージ化と拡張機能IDの固定化について
+
+Chrome 拡張機能は通常、読み込みフォルダのパスやパッケージ化のたびに生成される秘密鍵によって32桁の拡張機能ID（例: `aknfdhacadhkkenklgmjklchcfjjnghh`）が変化します。IDが変わってしまうと、ブラウザに保存された設定（`chrome.storage`）や権限許可、ツールバーのピン留めが初期化されてしまいます。
+
+本プロジェクトでは**ID固定化の自動管理機構**（[scripts/package.mjs](file:///d:/dev/HoiHoi/scripts/package.mjs)）を導入しています：
+
+1. **秘密鍵 (`key.pem`) の永続化**:
+   - 初回パッケージ化時に RSA 秘密鍵 `key.pem` を自動生成し、以降はこの鍵を一貫して使用します。
+   - `key.pem` は Git 管理対象外（`.gitignore`）となっています。安全に保管してください。
+2. **マニフェスト (`manifest.json`) の公開鍵 (`key`) 自動同期**:
+   - 秘密鍵から導出された公開鍵が `public/manifest.json` の `"key"` フィールドに自動設定されます。
+   - これにより、`dist` を**「パッケージ化されていない拡張機能」として読み込んだ場合でも、常に全く同じ32桁の固定ID**になります。
+3. **パッケージ成果物 (`release/`)**:
+   - `hoihoi-v{version}.zip`: Chrome Web Store や Edge アドオンストア提出用、またはZIP展開配布用
+   - `hoihoi-v{version}.crx`: Chromium ブラウザ直接インストール用の自己署名パッケージ
+
+---
+
+### Chrome / Edge への読み込み方法
 
 1. Google Chrome で `chrome://extensions` を開く
 2. 右上の「デベロッパー モード」を ON にする

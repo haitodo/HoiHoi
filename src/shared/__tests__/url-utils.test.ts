@@ -88,10 +88,10 @@ describe('url-utils', () => {
       expect(isLikelyImageLinkHref('https://example.com/photos/dog.JPG')).toBe(true);
       expect(isLikelyImageLinkHref('https://example.com/art.png?download=true')).toBe(true);
       expect(isLikelyImageLinkHref('https://example.com/vector.svg')).toBe(true);
-      // Support trailing slashes (e.g. xasiat / dynamic galleries)
+      // Support trailing slashes (e.g. dynamic galleries)
       expect(
         isLikelyImageLinkHref(
-          'https://www.xasiat.com/get_image/2/a5974dad055576d571bda101a12841d9/sources/38000/38344/2674168.jpg/?i-acctoken=NzI1ODN8YWFlNzU0Y2UyMDMyOTAzZTg3YWRlYTg2YWU5MjUyNzA',
+          'https://images.example.com/get_image/2/a5974dad055576d571bda101a12841d9/sources/38000/38344/sample-photo.jpg/?i-acctoken=NzI1ODN8YWFlNzU0Y2UyMDMyOTAzZTg3YWRlYTg2YWU5MjUyNzA',
         ),
       ).toBe(true);
       expect(isLikelyImageLinkHref('https://example.com/photos/cat.png/')).toBe(true);
@@ -123,7 +123,7 @@ describe('url-utils', () => {
       expect(inferImageFormat('https://example.com/banner.gif')).toBe('gif');
       expect(
         inferImageFormat(
-          'https://www.xasiat.com/get_image/2/a5974dad055576d571bda101a12841d9/sources/38000/38344/2674168.jpg/?i-acctoken=NzI1ODN8YWFlNzU0Y2UyMDMyOTAzZTg3YWRlYTg2YWU5MjUyNzA',
+          'https://images.example.com/get_image/2/a5974dad055576d571bda101a12841d9/sources/38000/38344/sample-photo.jpg/?i-acctoken=NzI1ODN8YWFlNzU0Y2UyMDMyOTAzZTg3YWRlYTg2YWU5MjUyNzA',
         ),
       ).toBe('jpeg');
     });

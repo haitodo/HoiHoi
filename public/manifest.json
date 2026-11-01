@@ -23,8 +23,13 @@
   ],
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["content/scanner.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content/scanner.js"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -43,5 +48,6 @@
   "background": {
     "service_worker": "background.js",
     "type": "module"
-  }
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3GRQLdt8MdtkEKMIbi1kk/NW4yTcOoQUVf36Ab61YUryskaSNSX54CscqXSonZ1IOndTH71JCXHQXcY47EBeJEkSbWnuecF2J5ec2VdmtR6ed4/yq2qzp7c1T/x/86YpIhnpGUQjIXi5O9ut+iAS806SGYy4ePvMuj1ZTxkjadyXNC6w4C0VhsxTqgR572ilnWVpyKwwqLI8Lk1QcON8xvB4qqMGRwbZ71e1J37lkqplddbZ8LcNAWG5NMlv8SExQnwfBf4ig6TZM7iiGpXDRYlSxIS9/91VtCPsqfhII9iv5hqL7KXcAbbUDVebmXpVYyEKoA8rhC6OEmCfCutWqwIDAQAB"
 }
