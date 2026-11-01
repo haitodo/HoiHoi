@@ -144,6 +144,15 @@ export function useTabSession(tabId: number | null) {
     }
   }, [tabId]);
 
+  const sendPanelMessage = useCallback(async (msg: PanelToBackgroundMessage) => {
+    try {
+      if (typeof chrome === 'undefined' || !chrome.runtime?.id) return;
+      await chrome.runtime.sendMessage(msg);
+    } catch (err) {
+      console.warn('[WIC Panel] sendMessage failed:', err);
+    }
+  }, []);
+
   const toggleSelection = useCallback(
     async (itemId: string) => {
       if (tabId === null) return;
@@ -153,9 +162,9 @@ export function useTabSession(tabId: number | null) {
         tabId,
         mutation: { mode: 'toggle_one', itemId },
       };
-      await chrome.runtime.sendMessage(msg);
+      await sendPanelMessage(msg);
     },
-    [tabId],
+    [tabId, sendPanelMessage],
   );
 
   const selectAllVisible = useCallback(
@@ -167,9 +176,9 @@ export function useTabSession(tabId: number | null) {
         tabId,
         mutation: { mode: 'add_many', itemIds },
       };
-      await chrome.runtime.sendMessage(msg);
+      await sendPanelMessage(msg);
     },
-    [tabId],
+    [tabId, sendPanelMessage],
   );
 
   const clearAllSelection = useCallback(async () => {
@@ -180,8 +189,8 @@ export function useTabSession(tabId: number | null) {
       tabId,
       mutation: { mode: 'clear_all' },
     };
-    await chrome.runtime.sendMessage(msg);
-  }, [tabId]);
+    await sendPanelMessage(msg);
+  }, [tabId, sendPanelMessage]);
 
   const selectVariant = useCallback(
     async (itemId: string, variantUrl: string) => {
@@ -193,9 +202,9 @@ export function useTabSession(tabId: number | null) {
         itemId,
         variantUrl,
       };
-      await chrome.runtime.sendMessage(msg);
+      await sendPanelMessage(msg);
     },
-    [tabId],
+    [tabId, sendPanelMessage],
   );
 
   const reportThumbDimensions = useCallback(
@@ -210,9 +219,9 @@ export function useTabSession(tabId: number | null) {
         naturalWidth: width,
         naturalHeight: height,
       };
-      chrome.runtime.sendMessage(msg).catch(() => {});
+      void sendPanelMessage(msg);
     },
-    [tabId],
+    [tabId, sendPanelMessage],
   );
 
   const enqueueDownloads = useCallback(
@@ -224,9 +233,9 @@ export function useTabSession(tabId: number | null) {
         tabId,
         itemIds,
       };
-      await chrome.runtime.sendMessage(msg);
+      await sendPanelMessage(msg);
     },
-    [tabId],
+    [tabId, sendPanelMessage],
   );
 
   const retryFailedDownloads = useCallback(
@@ -238,9 +247,9 @@ export function useTabSession(tabId: number | null) {
         tabId,
         itemIds,
       };
-      await chrome.runtime.sendMessage(msg);
+      await sendPanelMessage(msg);
     },
-    [tabId],
+    [tabId, sendPanelMessage],
   );
 
   const batchSelectVariants = useCallback(
@@ -253,9 +262,9 @@ export function useTabSession(tabId: number | null) {
         target,
         itemIds,
       };
-      await chrome.runtime.sendMessage(msg);
+      await sendPanelMessage(msg);
     },
-    [tabId],
+    [tabId, sendPanelMessage],
   );
 
   return {

@@ -37,9 +37,11 @@ chrome.action.onClicked.addListener((tab) => {
 
 // Broadcast session events to any open extension views (Side Panel)
 sessionStore.onEvent((event: BackgroundToPanelEvent) => {
-  chrome.runtime.sendMessage(event).catch(() => {
-    // Side Panel might be closed or switching tabs; safe to ignore
-  });
+  try {
+    chrome.runtime.sendMessage(event).catch(() => {
+      // Side Panel might be closed or switching tabs; safe to ignore
+    });
+  } catch {}
 });
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {

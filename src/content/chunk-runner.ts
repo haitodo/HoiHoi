@@ -37,11 +37,66 @@ const IMAGE_TARGET_SELECTOR = [
   '[style*="url("]',
 ].join(', ');
 
+/**
+ * Checks whether the Chrome extension context is still alive.
+ * When the extension is reloaded or updated, the old context is invalidated.
+ */
+function isExtensionContextValid(): boolean {
+  try {
+    return Boolean(typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Checks whether an error is caused by Chrome extension context invalidation.
+ */
+function isContextInvalidatedError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = String(err);
+  return msg.includes('Extension context invalidated') || msg.includes('context invalidated');
+}
+
+/**
+ * Safely dispatches a message to the Background Service Worker without throwing unhandled exceptions
+ * if the extension has been reloaded or context is invalidated.
+ */
+function safeSendMessage(
+  message: ContentToBackgroundMessage,
+  onInvalidated?: () => void,
+): void {
+  if (!isExtensionContextValid()) {
+    onInvalidated?.();
+    return;
+  }
+
+  try {
+    const promise = chrome.runtime.sendMessage(message);
+    if (promise && typeof promise.catch === 'function') {
+      promise.catch((err: unknown) => {
+        if (isContextInvalidatedError(err)) {
+          onInvalidated?.();
+        } else {
+          console.warn('[WIC Content] Failed to send message:', err);
+        }
+      });
+    }
+  } catch (err: unknown) {
+    if (isContextInvalidatedError(err)) {
+      onInvalidated?.();
+    } else {
+      console.warn('[WIC Content] Synchronous sendMessage error:', err);
+    }
+  }
+}
+
 export function createChunkRunner(options: {
   largeDataUrlStore: Map<string, string>;
 }): ChunkRunnerController {
   const { largeDataUrlStore } = options;
 
+  let isDestroyed = false;
   let currentScanEpoch = 0;
   let elementCounter = 0;
   let domOrderCounter = 0;
@@ -62,7 +117,42 @@ export function createChunkRunner(options: {
   let batchFlushTimer: number | null = null;
   let totalCandidatesSent = 0;
 
+  function destroy() {
+    if (isDestroyed) return;
+    isDestroyed = true;
+
+    if (sliceTimer !== null) {
+      clearTimeout(sliceTimer);
+      sliceTimer = null;
+    }
+    if (batchFlushTimer !== null) {
+      clearTimeout(batchFlushTimer);
+      batchFlushTimer = null;
+    }
+    if (mutationDebounceTimer !== null) {
+      clearTimeout(mutationDebounceTimer);
+      mutationDebounceTimer = null;
+    }
+
+    try {
+      observer.disconnect();
+    } catch {}
+
+    try {
+      window.removeEventListener('load', onCaptureLoad, true);
+    } catch {}
+
+    pendingElements = [];
+    batchBuffer = [];
+    mutatedElements.clear();
+  }
+
   function flushBatch() {
+    if (isDestroyed || !isExtensionContextValid()) {
+      destroy();
+      return;
+    }
+
     if (batchFlushTimer !== null) {
       clearTimeout(batchFlushTimer);
       batchFlushTimer = null;
@@ -83,12 +173,15 @@ export function createChunkRunner(options: {
       groups: groupsToSend,
     };
 
-    chrome.runtime.sendMessage(message).catch((err) => {
-      console.warn('[WIC Content] Failed to send scan batch:', err);
-    });
+    safeSendMessage(message, destroy);
   }
 
   function enqueueGroup(group: RawCandidateGroup) {
+    if (isDestroyed || !isExtensionContextValid()) {
+      destroy();
+      return;
+    }
+
     batchBuffer.push(group);
     // Flush immediately on very first discovery so UI renders right away
     if (totalCandidatesSent === 0 && batchBuffer.length >= 5) {
@@ -131,6 +224,11 @@ export function createChunkRunner(options: {
   }
 
   function runNextSlice() {
+    if (isDestroyed || !isExtensionContextValid()) {
+      destroy();
+      return;
+    }
+
     isSliceRunning = true;
     sliceTimer = null;
 
@@ -166,10 +264,15 @@ export function createChunkRunner(options: {
       pageTitle: document.title || undefined,
       status: 'watching',
     };
-    chrome.runtime.sendMessage(statusMsg).catch(() => {});
+    safeSendMessage(statusMsg, destroy);
   }
 
   function scheduleElements(elements: Element[]) {
+    if (isDestroyed || !isExtensionContextValid()) {
+      destroy();
+      return;
+    }
+
     for (const el of elements) {
       pendingElements.push(el);
     }
@@ -183,6 +286,11 @@ export function createChunkRunner(options: {
   const mutatedElements = new Set<Element>();
 
   const observer = new MutationObserver((mutations) => {
+    if (isDestroyed || !isExtensionContextValid()) {
+      destroy();
+      return;
+    }
+
     for (const mut of mutations) {
       if (mut.type === 'childList') {
         for (let i = 0; i < mut.addedNodes.length; i++) {
@@ -209,6 +317,10 @@ export function createChunkRunner(options: {
     }
     mutationDebounceTimer = window.setTimeout(() => {
       mutationDebounceTimer = null;
+      if (isDestroyed || !isExtensionContextValid()) {
+        destroy();
+        return;
+      }
       if (mutatedElements.size > 0) {
         const batch = Array.from(mutatedElements);
         mutatedElements.clear();
@@ -226,6 +338,11 @@ export function createChunkRunner(options: {
 
   // Track late image loads via capture phase load listener
   const onCaptureLoad = (e: Event) => {
+    if (isDestroyed || !isExtensionContextValid()) {
+      destroy();
+      return;
+    }
+
     const target = e.target;
     if (target instanceof HTMLImageElement) {
       if (target.naturalWidth > 0 && target.naturalHeight > 0) {
@@ -239,7 +356,7 @@ export function createChunkRunner(options: {
             naturalWidth: target.naturalWidth,
             naturalHeight: target.naturalHeight,
           };
-          chrome.runtime.sendMessage(msg).catch(() => {});
+          safeSendMessage(msg, destroy);
         }
       }
     }
@@ -248,6 +365,11 @@ export function createChunkRunner(options: {
 
   return {
     startOrRescan(scanEpoch: number) {
+      if (isDestroyed || !isExtensionContextValid()) {
+        destroy();
+        return;
+      }
+
       currentScanEpoch = scanEpoch;
       totalCandidatesSent = 0;
       // Abort any in-progress slices and clear buffers
@@ -269,19 +391,13 @@ export function createChunkRunner(options: {
         pageTitle: document.title || undefined,
         status: 'scanning',
       };
-      chrome.runtime.sendMessage(statusMsg).catch(() => {});
+      safeSendMessage(statusMsg, destroy);
 
       // Targeted fast query for image elements
       const directTargets = Array.from(document.querySelectorAll(IMAGE_TARGET_SELECTOR));
       console.log(`[WIC Content] Starting scan for epoch ${scanEpoch}. Found ${directTargets.length} potential image elements.`);
       scheduleElements(directTargets);
     },
-    destroy() {
-      if (sliceTimer !== null) clearTimeout(sliceTimer);
-      if (batchFlushTimer !== null) clearTimeout(batchFlushTimer);
-      if (mutationDebounceTimer !== null) clearTimeout(mutationDebounceTimer);
-      observer.disconnect();
-      window.removeEventListener('load', onCaptureLoad, true);
-    },
+    destroy,
   };
 }

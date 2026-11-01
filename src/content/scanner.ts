@@ -19,6 +19,14 @@ declare global {
   }
 }
 
+function isExtensionContextValid(): boolean {
+  try {
+    return Boolean(typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id);
+  } catch {
+    return false;
+  }
+}
+
 function createScannerController(): WicScannerController {
   let currentScanEpoch = 1;
   const largeDataUrlStore = new Map<string, string>();
@@ -29,6 +37,11 @@ function createScannerController(): WicScannerController {
 
   // Listen for background commands
   chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+    if (!isExtensionContextValid()) {
+      chunkRunner.destroy();
+      return false;
+    }
+
     if (!isBgToContentMessage(message)) return false;
 
     switch (message.type) {
@@ -83,12 +96,16 @@ function createScannerController(): WicScannerController {
   // Automatically start an initial scan once DOM is ready so images are discovered proactively
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-      chunkRunner.startOrRescan(currentScanEpoch);
+      if (isExtensionContextValid()) {
+        chunkRunner.startOrRescan(currentScanEpoch);
+      }
     });
   } else {
     // DOM already ready, scan immediately
     setTimeout(() => {
-      chunkRunner.startOrRescan(currentScanEpoch);
+      if (isExtensionContextValid()) {
+        chunkRunner.startOrRescan(currentScanEpoch);
+      }
     }, 100);
   }
 
@@ -106,7 +123,12 @@ function createScannerController(): WicScannerController {
   };
 }
 
-if (!window.__WIC_SCANNER__) {
-  console.log('[WIC Content] Initializing content script on:', window.location.href);
-  window.__WIC_SCANNER__ = createScannerController();
+// Clean up any lingering previous controller if extension was re-injected
+if (window.__WIC_SCANNER__) {
+  try {
+    window.__WIC_SCANNER__.destroy();
+  } catch {}
 }
+
+console.log('[WIC Content] Initializing content script on:', window.location.href);
+window.__WIC_SCANNER__ = createScannerController();
