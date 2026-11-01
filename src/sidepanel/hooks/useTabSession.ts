@@ -45,7 +45,9 @@ export function useTabSession(tabId: number | null) {
     if (tabId === null) return;
 
     const handleMessage = (msg: unknown) => {
-      if (!isBgToPanelEvent(msg) || msg.tabId !== tabId) return;
+      if (!isBgToPanelEvent(msg)) return;
+      // Accept events for current tab, or if tabId was not yet resolved (<= 0)
+      if (tabId !== null && tabId > 0 && msg.tabId !== tabId) return;
 
       if (msg.type === 'EVENT_SESSION_REPLACED') {
         setSnapshot(msg.snapshot);
@@ -53,18 +55,14 @@ export function useTabSession(tabId: number | null) {
         return;
       }
 
-      // Check revision consistency
-      const expectedRevision = revisionRef.current + 1;
-      if (msg.revision !== expectedRevision) {
-        // Missed message detected -> self-heal via full snapshot
-        void fetchSnapshot(tabId);
-        return;
-      }
-
       revisionRef.current = msg.revision;
 
       setSnapshot((prev) => {
-        if (!prev) return null;
+        if (!prev) {
+          // If we didn't have a snapshot yet, trigger a full fetch
+          void fetchSnapshot(msg.tabId);
+          return null;
+        }
 
         switch (msg.type) {
           case 'EVENT_ITEMS_UPSERTED': {
@@ -87,7 +85,7 @@ export function useTabSession(tabId: number | null) {
               ...prev,
               revision: msg.revision,
               items: nextItems,
-              scanStatus: msg.scanStatus,
+              scanStatus: msg.scanStatus || 'watching',
             };
           }
 

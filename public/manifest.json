@@ -20,6 +20,13 @@
     "http://*/*",
     "https://*/*"
   ],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content/scanner.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "action": {
     "default_title": "Web Image Collector を開いてこのタブをスキャン",
     "default_icon": {

@@ -3,12 +3,8 @@ import { readBlobAsDataUrl } from './blob-reader';
 import { createChunkRunner, type ChunkRunnerController } from './chunk-runner';
 
 /**
- * Programmatically Injected Content Script (`dist/content/scanner.js`)
- *
- * CRITICAL INVARIANTS (`design.md` §4, Task C1–C3):
- * 1. Single IIFE bundle with no dynamic ESM imports.
- * 2. Guaranteed idempotent initialization guarded by `window.__WIC_SCANNER__`.
- * 3. Handles `BG_PING_CONTENT`, `BG_START_OR_RESCAN`, `BG_FETCH_BLOB_AS_DATA_URL`, and `BG_RESOLVE_LARGE_DATA_URL`.
+ * Robust Content Script (`dist/content/scanner.js`)
+ * Runs directly on webpages (via manifest content_scripts + dynamic fallback).
  */
 
 interface WicScannerController {
@@ -24,13 +20,14 @@ declare global {
 }
 
 function createScannerController(): WicScannerController {
-  let currentScanEpoch = 0;
+  let currentScanEpoch = 1;
   const largeDataUrlStore = new Map<string, string>();
 
   const chunkRunner: ChunkRunnerController = createChunkRunner({
     largeDataUrlStore,
   });
 
+  // Listen for background commands
   chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
     if (!isBgToContentMessage(message)) return false;
 
@@ -48,14 +45,14 @@ function createScannerController(): WicScannerController {
       }
 
       case 'BG_START_OR_RESCAN': {
-        currentScanEpoch = message.scanEpoch;
+        currentScanEpoch = message.scanEpoch || currentScanEpoch + 1;
+        console.log(`[WIC Content] Received BG_START_OR_RESCAN for epoch ${currentScanEpoch}`);
         chunkRunner.startOrRescan(currentScanEpoch);
         sendResponse({ ok: true });
         return false;
       }
 
       case 'BG_FETCH_BLOB_AS_DATA_URL': {
-        // Asynchronous resolution inside page origin
         readBlobAsDataUrl(message.blobUrl, message.maxBytes)
           .then((res) => {
             sendResponse({ ok: true, data: res });
@@ -63,7 +60,7 @@ function createScannerController(): WicScannerController {
           .catch((err: unknown) => {
             sendResponse({ ok: false, error: String(err), code: 'BLOB_FETCH_FAILED' });
           });
-        return true; // Keep channel open for async sendResponse
+        return true;
       }
 
       case 'BG_RESOLVE_LARGE_DATA_URL': {
@@ -71,7 +68,7 @@ function createScannerController(): WicScannerController {
         if (!fullDataUrl) {
           sendResponse({
             ok: false,
-            error: 'Large data URL reference expired or not found in page memory',
+            error: 'Large data URL reference expired or not found',
             code: 'NOT_FOUND',
           });
         } else {
@@ -81,6 +78,18 @@ function createScannerController(): WicScannerController {
       }
     }
   });
+
+  // Automatically start an initial scan once DOM is ready so images are discovered proactively
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      chunkRunner.startOrRescan(currentScanEpoch);
+    });
+  } else {
+    // DOM already ready, scan immediately
+    setTimeout(() => {
+      chunkRunner.startOrRescan(currentScanEpoch);
+    }, 100);
+  }
 
   return {
     startOrRescan(scanEpoch: number) {
@@ -97,5 +106,6 @@ function createScannerController(): WicScannerController {
 }
 
 if (!window.__WIC_SCANNER__) {
+  console.log('[WIC Content] Initializing content script on:', window.location.href);
   window.__WIC_SCANNER__ = createScannerController();
 }

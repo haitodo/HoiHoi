@@ -246,10 +246,10 @@ export class SessionStore {
     scanEpoch: number,
     groups: RawCandidateGroup[],
   ): void {
-    const session = this.sessions.get(tabId);
-    if (!session || session.scanEpoch !== scanEpoch) {
-      // Discard delayed batches from prior epochs
-      return;
+    const session = this.getOrCreateSession(tabId);
+    // Keep scanEpoch synced with the latest seen
+    if (scanEpoch > session.scanEpoch) {
+      session.scanEpoch = scanEpoch;
     }
 
     const upsertedMap = new Map<string, ImageItem>();
