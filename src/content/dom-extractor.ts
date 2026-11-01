@@ -1,4 +1,5 @@
 import {
+  HIGH_RES_ATTR_NAMES,
   INLINE_DATA_URL_SESSION_MAX_CHARS,
   LAZY_SRC_ATTR_ALLOWLIST,
   LAZY_SRCSET_ATTR_ALLOWLIST,
@@ -24,11 +25,61 @@ export interface ExtractorContext {
   domOrderCounter: () => number;
 }
 
-/** Detects common 1x1 transparent GIFs or empty SVG placeholders used by lazy loaders */
+/** Detects common 1x1 transparent GIFs/PNGs or empty SVG placeholders used by lazy loaders */
 function isPlaceholderUrl(url: string): boolean {
   if (url.startsWith('data:image/gif;base64,R0lGODlhAQAB')) return true;
+  if (url.startsWith('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB')) return true;
   if (url.startsWith('data:image/svg+xml') && url.length < 150) return true;
   if (url === 'about:blank') return true;
+  return false;
+}
+
+/** Detects attributes or CSS classes indicating that an <a> element triggers an image modal/lightbox */
+function isLightboxOrModalLink(link: Element): boolean {
+  const fancyboxType = link.getAttribute('data-fancybox-type');
+  if (fancyboxType === 'image') return true;
+
+  const dataType = link.getAttribute('data-type');
+  if (dataType === 'image') return true;
+
+  if (link.hasAttribute('data-lightbox')) return true;
+
+  const fancybox = link.getAttribute('data-fancybox');
+  if (fancybox && fancybox !== 'iframe' && fancybox !== 'ajax') return true;
+
+  const rel = link.getAttribute('rel');
+  if (rel && /\b(images?|lightbox|photos?|gallery|prettyPhoto)\b/i.test(rel)) return true;
+
+  const cls = link.className;
+  if (
+    typeof cls === 'string' &&
+    /\b(fancybox|lightbox|zoom|photoswipe|magnific|spotlight|modal-image|highslide)\b/i.test(cls)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/** Determines whether a resolved URL appears to be an HTML page or same-page anchor, not an image asset */
+function isDocumentOrPageUrl(urlStr: string, baseUri: string): boolean {
+  try {
+    const parsed = new URL(urlStr);
+    const base = new URL(baseUri);
+    // Same-page anchor or identical URL
+    if (
+      parsed.origin === base.origin &&
+      parsed.pathname === base.pathname &&
+      (parsed.hash || parsed.search === base.search)
+    ) {
+      return true;
+    }
+    const path = parsed.pathname.toLowerCase();
+    // Exclude common document/webpage extensions
+    if (/\.(html?|php|aspx?|jsp|cgi)$/i.test(path)) {
+      return true;
+    }
+  } catch {}
   return false;
 }
 
@@ -130,23 +181,24 @@ export function extractFromImageElement(
     addedUrls.add(directSrcUrl);
   }
 
-  // 4. Check lazy loading single-URL attributes on img (e.g. data-src, data-original)
+  // 4. Check lazy loading single-URL attributes on img (e.g. data-src, data-original, data-highres)
   let primaryLazyUrl: string | null = null;
   for (const attr of LAZY_SRC_ATTR_ALLOWLIST) {
     const val = img.getAttribute(attr);
     if (val) {
       const resolved = resolveAndValidateImageUrl(val, baseUri);
       if (resolved && !isPlaceholderUrl(resolved)) {
-        if (!primaryLazyUrl) primaryLazyUrl = resolved;
+        const isHighRes = HIGH_RES_ATTR_NAMES.has(attr);
+        if (!primaryLazyUrl && !isHighRes) primaryLazyUrl = resolved;
         if (!addedUrls.has(resolved)) {
           variants.push(
             normalizeAndRegisterCandidate(
               resolved,
-              'lazy-attr',
+              isHighRes ? 'link-target' : 'lazy-attr',
               'lazy-attr',
               null,
               null,
-              undefined,
+              isHighRes ? 'highres-attr' : undefined,
               ctx,
             ),
           );
@@ -235,17 +287,39 @@ export function extractFromImageElement(
   // 8. Check enclosing <a href> or <a data-src> image link
   const link = img.closest('a');
   if (link) {
+    const isModalOrLightbox = isLightboxOrModalLink(link);
+
     const rawLinkUrls = [
       link.getAttribute('href'),
+      link.getAttribute('data-href'),
       link.getAttribute('data-src'),
       link.getAttribute('data-original'),
       link.getAttribute('data-image'),
+      link.getAttribute('data-full'),
+      link.getAttribute('data-full-img'),
+      link.getAttribute('data-highres'),
+      link.getAttribute('data-zoom-image'),
+      link.getAttribute('data-large'),
+      link.getAttribute('data-large-img'),
+      link.getAttribute('data-url'),
     ].filter(Boolean) as string[];
 
     for (const rawLinkUrl of rawLinkUrls) {
-      if (rawLinkUrl.startsWith('javascript:')) continue;
+      if (
+        !rawLinkUrl ||
+        rawLinkUrl.startsWith('javascript:') ||
+        rawLinkUrl.startsWith('#') ||
+        rawLinkUrl === 'about:blank'
+      ) {
+        continue;
+      }
       const resolved = resolveAndValidateImageUrl(rawLinkUrl, baseUri);
-      if (resolved && isLikelyImageLinkHref(resolved) && !addedUrls.has(resolved)) {
+      if (
+        resolved &&
+        !addedUrls.has(resolved) &&
+        (isLikelyImageLinkHref(resolved) ||
+          (isModalOrLightbox && !isDocumentOrPageUrl(resolved, baseUri)))
+      ) {
         variants.push(
           normalizeAndRegisterCandidate(
             resolved,
@@ -253,7 +327,7 @@ export function extractFromImageElement(
             'link-href',
             null,
             null,
-            undefined,
+            isModalOrLightbox ? 'modal-highres' : undefined,
             ctx,
           ),
         );
@@ -342,11 +416,45 @@ export function extractFromCssBackground(
       undefined,
       ctx,
     );
+
+    const variants: RawVariantCandidate[] = [candidate];
+
+    // Check if element has an enclosing <a> link pointing to a full image
+    const link = el.closest('a');
+    if (link) {
+      const isModal = isLightboxOrModalLink(link);
+      const rawHref =
+        link.getAttribute('href') ||
+        link.getAttribute('data-href') ||
+        link.getAttribute('data-src');
+      if (rawHref && !rawHref.startsWith('#') && !rawHref.startsWith('javascript:')) {
+        const resolved = resolveAndValidateImageUrl(rawHref, ctx.baseUri);
+        if (
+          resolved &&
+          resolved !== url &&
+          (isLikelyImageLinkHref(resolved) ||
+            (isModal && !isDocumentOrPageUrl(resolved, ctx.baseUri)))
+        ) {
+          variants.push(
+            normalizeAndRegisterCandidate(
+              resolved,
+              'link-target',
+              'link-href',
+              null,
+              null,
+              isModal ? 'modal-highres' : undefined,
+              ctx,
+            ),
+          );
+        }
+      }
+    }
+
     groups.push({
       occurrenceKey: `${elKey}::css-bg::${url}`,
       primaryUrl: url,
       domOrder: ctx.domOrderCounter(),
-      variants: [candidate],
+      variants,
     });
   }
 

@@ -13,7 +13,7 @@ import type {
   ScanStatus,
   TabSessionSnapshot,
 } from '@shared/types';
-import { inferImageFormat } from '@shared/url-utils';
+import { inferImageFormat, pickBestVariantUrl } from '@shared/url-utils';
 
 export interface InternalTabSession {
   tabId: number;
@@ -26,6 +26,7 @@ export interface InternalTabSession {
   itemCounter: number;
   items: ImageItem[];
   itemByPrimaryUrl: Map<string, ImageItem>;
+  itemByVariantUrl: Map<string, ImageItem>;
   itemById: Map<string, ImageItem>;
   seenOccurrenceKeys: Set<string>;
   selectedIds: Set<string>;
@@ -85,12 +86,17 @@ export class SessionStore {
 
   private restoreSessionFromSnapshot(snap: TabSessionSnapshot): void {
     const itemByPrimaryUrl = new Map<string, ImageItem>();
+    const itemByVariantUrl = new Map<string, ImageItem>();
     const itemById = new Map<string, ImageItem>();
     let maxCounter = 0;
 
     for (const item of snap.items) {
       itemByPrimaryUrl.set(item.primaryUrl, item);
       itemById.set(item.itemId, item);
+      itemByVariantUrl.set(item.primaryUrl, item);
+      for (const v of item.variants) {
+        itemByVariantUrl.set(v.url, item);
+      }
       const match = /^item_(\d+)$/.exec(item.itemId);
       if (match?.[1]) {
         maxCounter = Math.max(maxCounter, Number(match[1]));
@@ -115,6 +121,7 @@ export class SessionStore {
       itemCounter: maxCounter,
       items: snap.items,
       itemByPrimaryUrl,
+      itemByVariantUrl,
       itemById,
       seenOccurrenceKeys: new Set(),
       selectedIds: new Set(snap.selectedIds || []),
@@ -143,6 +150,7 @@ export class SessionStore {
         itemCounter: 0,
         items: [],
         itemByPrimaryUrl: new Map(),
+        itemByVariantUrl: new Map(),
         itemById: new Map(),
         seenOccurrenceKeys: new Set(),
         selectedIds: new Set(),
@@ -223,6 +231,7 @@ export class SessionStore {
     session.scanStatus = initialStatus;
     session.items = [];
     session.itemByPrimaryUrl.clear();
+    session.itemByVariantUrl.clear();
     session.itemById.clear();
     session.seenOccurrenceKeys.clear();
     session.selectedIds.clear();
@@ -257,6 +266,20 @@ export class SessionStore {
     for (const group of groups) {
       let item = session.itemByPrimaryUrl.get(group.primaryUrl);
 
+      // Check if any variant or primaryUrl is known (crucial for modal / lightbox instances)
+      if (!item) {
+        item = session.itemByVariantUrl.get(group.primaryUrl);
+        if (!item) {
+          for (const v of group.variants) {
+            const match = session.itemByVariantUrl.get(v.url);
+            if (match) {
+              item = match;
+              break;
+            }
+          }
+        }
+      }
+
       if (!item) {
         // Enforce MAX_ITEMS_PER_TAB limit
         if (session.items.length >= MAX_ITEMS_PER_TAB) {
@@ -282,6 +305,8 @@ export class SessionStore {
         session.itemById.set(itemId, item);
       }
 
+      session.itemByVariantUrl.set(group.primaryUrl, item);
+
       // Check occurrence key deduplication
       if (!session.seenOccurrenceKeys.has(group.occurrenceKey)) {
         session.seenOccurrenceKeys.add(group.occurrenceKey);
@@ -290,6 +315,8 @@ export class SessionStore {
 
       // Merge variants into item
       for (const rawVar of group.variants) {
+        session.itemByVariantUrl.set(rawVar.url, item);
+
         if (!item.sources.includes(rawVar.source)) {
           item.sources.push(rawVar.source);
         }
@@ -321,6 +348,11 @@ export class SessionStore {
             existingVar.naturalHeight = rawVar.naturalHeight;
           }
         }
+      }
+
+      // Automatically select best high-resolution candidate if not manually chosen
+      if (!item.manualVariantSelected) {
+        item.selectedUrl = pickBestVariantUrl(item.variants);
       }
 
       upsertedMap.set(item.itemId, item);
@@ -394,6 +426,7 @@ export class SessionStore {
     if (!variant) return false;
 
     item.selectedUrl = variantUrl;
+    item.manualVariantSelected = true;
     session.revision += 1;
     session.dirty = true;
     this.schedulePersist();
@@ -406,6 +439,50 @@ export class SessionStore {
       upsertedItems: [item],
       scanStatus: session.scanStatus,
     });
+
+    return true;
+  }
+
+  batchSelectVariants(
+    tabId: number,
+    target: 'high_res' | 'display',
+    itemIds?: string[],
+  ): boolean {
+    const session = this.sessions.get(tabId);
+    if (!session) return false;
+
+    const targetSet = itemIds ? new Set(itemIds) : null;
+    const modifiedItems: ImageItem[] = [];
+
+    for (const item of session.items) {
+      if (targetSet && !targetSet.has(item.itemId)) continue;
+
+      const newUrl =
+        target === 'high_res'
+          ? pickBestVariantUrl(item.variants)
+          : item.primaryUrl;
+
+      if (item.selectedUrl !== newUrl) {
+        item.selectedUrl = newUrl;
+        item.manualVariantSelected = target === 'display';
+        modifiedItems.push(item);
+      }
+    }
+
+    if (modifiedItems.length > 0) {
+      session.revision += 1;
+      session.dirty = true;
+      this.schedulePersist();
+
+      this.emitEvent({
+        channel: 'WIC_BG_TO_PANEL',
+        type: 'EVENT_ITEMS_UPSERTED',
+        tabId,
+        revision: session.revision,
+        upsertedItems: modifiedItems,
+        scanStatus: session.scanStatus,
+      });
+    }
 
     return true;
   }

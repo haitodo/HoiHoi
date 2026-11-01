@@ -26,6 +26,7 @@ export function App() {
     selectAllVisible,
     clearAllSelection,
     selectVariant,
+    batchSelectVariants,
     reportThumbDimensions,
     enqueueDownloads,
     retryFailedDownloads,
@@ -103,6 +104,8 @@ export function App() {
     return count;
   }, [selectedIdsSet, visibleItemIdsSet]);
 
+  const hasVariants = useMemo(() => rawItems.some((i) => i.variants.length > 1), [rawItems]);
+
   const scanStatus = snapshot?.scanStatus || 'unscanned';
   const showEmptyView =
     scanStatus === 'unscanned' ||
@@ -146,9 +149,11 @@ export function App() {
             selectedCount={selectedIdsSet.size}
             hiddenSelectedCount={hiddenSelectedCount}
             visibleCount={filteredItems.length}
+            hasVariants={hasVariants}
             onSelectVisible={() => selectAllVisible(visibleItemIds)}
             onClearAll={clearAllSelection}
             onDownloadSelected={() => enqueueDownloads(Array.from(selectedIdsSet))}
+            onApplyVariantPreference={(target) => batchSelectVariants(target, visibleItemIds)}
           />
         </>
       )}

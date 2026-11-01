@@ -21,11 +21,15 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   onDownload,
 }) => {
   const [imgError, setImgError] = useState(false);
+  const [useThumbnailFallback, setUseThumbnailFallback] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const activeVariant =
     item.variants.find((v) => v.url === item.selectedUrl) || item.variants[0];
   const selectedUrl = item.selectedUrl;
+  const previewUrl = useThumbnailFallback
+    ? (item.primaryUrl || selectedUrl)
+    : selectedUrl;
 
   const handleCopyUrl = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -175,10 +179,16 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           </div>
         ) : (
           <img
-            src={selectedUrl}
+            src={previewUrl}
             alt="Thumbnail"
             loading="lazy"
-            onError={() => setImgError(true)}
+            onError={() => {
+              if (!useThumbnailFallback && item.primaryUrl && item.primaryUrl !== selectedUrl) {
+                setUseThumbnailFallback(true);
+              } else {
+                setImgError(true);
+              }
+            }}
             onLoad={(e) => {
               const { naturalWidth, naturalHeight } = e.currentTarget;
               if (
@@ -231,7 +241,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
               {item.variants.map((v, idx) => {
                 const desc = v.descriptors.length > 0 ? ` (${v.descriptors.join(', ')})` : '';
                 const roleLabel = v.roles.includes('link-target')
-                  ? 'リンク先'
+                  ? '高解像度（リンク先）'
                   : v.roles.includes('current-src')
                     ? '表示画像'
                     : `候補 ${idx + 1}`;

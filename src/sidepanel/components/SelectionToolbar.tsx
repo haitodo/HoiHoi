@@ -4,18 +4,22 @@ interface SelectionToolbarProps {
   selectedCount: number;
   hiddenSelectedCount: number;
   visibleCount: number;
+  hasVariants?: boolean;
   onSelectVisible: () => void;
   onClearAll: () => void;
   onDownloadSelected: () => void;
+  onApplyVariantPreference?: (target: 'high_res' | 'display') => void;
 }
 
 export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   selectedCount,
   hiddenSelectedCount,
   visibleCount,
+  hasVariants,
   onSelectVisible,
   onClearAll,
   onDownloadSelected,
+  onApplyVariantPreference,
 }) => {
   return (
     <div
@@ -43,7 +47,27 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
         )}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        {hasVariants && onApplyVariantPreference && (
+          <button
+            type="button"
+            onClick={() => onApplyVariantPreference('high_res')}
+            style={{
+              padding: '3px 8px',
+              fontSize: 11,
+              border: '1px solid #c7d2fe',
+              borderRadius: 4,
+              backgroundColor: '#eef2ff',
+              color: '#4338ca',
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+            title="モーダルリンク先や高解像度候補に一括切替します"
+          >
+            高解像度を一括適用
+          </button>
+        )}
+
         <button
           type="button"
           onClick={onSelectVisible}

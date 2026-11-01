@@ -44,8 +44,8 @@ export const MAX_FILENAME_STEM_LENGTH = 100;
 export const ALLOWED_IMAGE_PROTOCOLS = new Set(['http:', 'https:', 'data:', 'blob:']);
 
 /**
- * Explicit allowlist of lazy-loading single-URL attributes (`spec.md` MVP-03, §6.1).
- * Do NOT indiscriminately scan arbitrary `data-*` attributes.
+ * Explicit allowlist of lazy-loading and high-resolution single-URL attributes (`spec.md` MVP-03, §6.1).
+ * Supports lazy loaders and popular lightbox / gallery zoom attributes (e.g. ElevateZoom, Lightgallery, PhotoSwipe, WordPress).
  */
 export const LAZY_SRC_ATTR_ALLOWLIST = [
   'data-src',
@@ -55,7 +55,32 @@ export const LAZY_SRC_ATTR_ALLOWLIST = [
   'data-url',
   'data-hi-res-src',
   'data-defer-src',
+  'data-highres',
+  'data-hi-res',
+  'data-zoom-image',
+  'data-large',
+  'data-large-img',
+  'data-full',
+  'data-full-img',
+  'data-full-image',
+  'data-orig-file',
+  'data-original-image',
 ] as const;
+
+/** High-resolution image attributes on <img> or <a> */
+export const HIGH_RES_ATTR_NAMES = new Set([
+  'data-highres',
+  'data-hi-res',
+  'data-hi-res-src',
+  'data-zoom-image',
+  'data-large',
+  'data-large-img',
+  'data-full',
+  'data-full-img',
+  'data-full-image',
+  'data-orig-file',
+  'data-original-image',
+]);
 
 /**
  * Explicit allowlist of lazy-loading srcset attributes (`spec.md` MVP-03, §6.1).
@@ -75,6 +100,11 @@ export const OBSERVED_MUTATION_ATTRIBUTES: readonly string[] = [
   'href',
   'xlink:href',
   'style',
+  'data-fancybox-type',
+  'data-type',
+  'data-lightbox',
+  'data-fancybox',
+  'rel',
   ...LAZY_SRC_ATTR_ALLOWLIST,
   ...LAZY_SRCSET_ATTR_ALLOWLIST,
 ];

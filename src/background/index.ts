@@ -136,6 +136,16 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
             break;
           }
 
+          case 'PANEL_BATCH_SELECT_VARIANTS': {
+            const ok = sessionStore.batchSelectVariants(
+              tabId,
+              message.target,
+              message.itemIds,
+            );
+            sendResponse({ ok });
+            break;
+          }
+
           case 'PANEL_REPORT_THUMB_DIMENSIONS': {
             sessionStore.updateItemDimensions(
               tabId,

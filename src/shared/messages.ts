@@ -122,6 +122,13 @@ export type PanelToBackgroundMessage =
     }
   | {
       channel: 'WIC_PANEL_TO_BG';
+      type: 'PANEL_BATCH_SELECT_VARIANTS';
+      tabId: number;
+      target: 'high_res' | 'display';
+      itemIds?: string[];
+    }
+  | {
+      channel: 'WIC_PANEL_TO_BG';
       type: 'PANEL_REPORT_THUMB_DIMENSIONS';
       tabId: number;
       itemId: string;

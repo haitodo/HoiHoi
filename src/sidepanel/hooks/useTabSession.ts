@@ -243,6 +243,21 @@ export function useTabSession(tabId: number | null) {
     [tabId],
   );
 
+  const batchSelectVariants = useCallback(
+    async (target: 'high_res' | 'display', itemIds?: string[]) => {
+      if (tabId === null) return;
+      const msg: PanelToBackgroundMessage = {
+        channel: 'WIC_PANEL_TO_BG',
+        type: 'PANEL_BATCH_SELECT_VARIANTS',
+        tabId,
+        target,
+        itemIds,
+      };
+      await chrome.runtime.sendMessage(msg);
+    },
+    [tabId],
+  );
+
   return {
     snapshot,
     loading,
@@ -251,6 +266,7 @@ export function useTabSession(tabId: number | null) {
     selectAllVisible,
     clearAllSelection,
     selectVariant,
+    batchSelectVariants,
     reportThumbDimensions,
     enqueueDownloads,
     retryFailedDownloads,

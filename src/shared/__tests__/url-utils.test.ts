@@ -4,6 +4,7 @@ import {
   inferImageFormat,
   isLikelyImageLinkHref,
   parseSrcset,
+  pickBestVariantUrl,
   resolveAndValidateImageUrl,
 } from '../url-utils';
 
@@ -87,6 +88,18 @@ describe('url-utils', () => {
       expect(isLikelyImageLinkHref('https://example.com/photos/dog.JPG')).toBe(true);
       expect(isLikelyImageLinkHref('https://example.com/art.png?download=true')).toBe(true);
       expect(isLikelyImageLinkHref('https://example.com/vector.svg')).toBe(true);
+      // Support trailing slashes (e.g. xasiat / dynamic galleries)
+      expect(
+        isLikelyImageLinkHref(
+          'https://www.xasiat.com/get_image/2/a5974dad055576d571bda101a12841d9/sources/38000/38344/2674168.jpg/?i-acctoken=NzI1ODN8YWFlNzU0Y2UyMDMyOTAzZTg3YWRlYTg2YWU5MjUyNzA',
+        ),
+      ).toBe(true);
+      expect(isLikelyImageLinkHref('https://example.com/photos/cat.png/')).toBe(true);
+      // Support Twitter/X :large and preset suffixes
+      expect(isLikelyImageLinkHref('https://example.com/photos/bird.webp:large')).toBe(true);
+      // Support format query parameters
+      expect(isLikelyImageLinkHref('https://example.com/api/get_image?format=webp')).toBe(true);
+      expect(isLikelyImageLinkHref('https://example.com/api/view?file=test.png')).toBe(true);
     });
 
     it('returns false for HTML pages and non-image endpoints', () => {
@@ -108,6 +121,11 @@ describe('url-utils', () => {
     it('infers from file extension in pathname', () => {
       expect(inferImageFormat('https://example.com/cat.PNG')).toBe('png');
       expect(inferImageFormat('https://example.com/banner.gif')).toBe('gif');
+      expect(
+        inferImageFormat(
+          'https://www.xasiat.com/get_image/2/a5974dad055576d571bda101a12841d9/sources/38000/38344/2674168.jpg/?i-acctoken=NzI1ODN8YWFlNzU0Y2UyMDMyOTAzZTg3YWRlYTg2YWU5MjUyNzA',
+        ),
+      ).toBe('jpeg');
     });
 
     it('infers from query parameters', () => {
@@ -117,6 +135,73 @@ describe('url-utils', () => {
 
     it('returns unknown when no indicators exist', () => {
       expect(inferImageFormat('https://example.com/dynamic-asset-endpoint')).toBe('unknown');
+    });
+  });
+
+  describe('pickBestVariantUrl', () => {
+    it('prioritizes link-target (modal / full size original) over thumbnail', () => {
+      const variants = [
+        {
+          url: 'https://example.com/thumb_200x150.jpg',
+          roles: ['lazy-attr' as const],
+          descriptors: [],
+        },
+        {
+          url: 'https://example.com/full_image_original.jpg',
+          roles: ['link-target' as const],
+          descriptors: [],
+        },
+      ];
+      expect(pickBestVariantUrl(variants)).toBe('https://example.com/full_image_original.jpg');
+    });
+
+    it('prioritizes high-density or high-width srcset variants when no link-target', () => {
+      const variants = [
+        {
+          url: 'https://example.com/pic-1x.jpg',
+          roles: ['current-src' as const],
+          descriptors: ['1x'],
+        },
+        {
+          url: 'https://example.com/pic-3x.jpg',
+          roles: ['srcset' as const],
+          descriptors: ['3x'],
+        },
+        {
+          url: 'https://example.com/pic-2x.jpg',
+          roles: ['srcset' as const],
+          descriptors: ['2x'],
+        },
+      ];
+      expect(pickBestVariantUrl(variants)).toBe('https://example.com/pic-3x.jpg');
+    });
+
+    it('prioritizes candidate with largest known dimensions', () => {
+      const variants = [
+        {
+          url: 'https://example.com/small.jpg',
+          roles: ['current-src' as const],
+          naturalWidth: 400,
+          naturalHeight: 300,
+        },
+        {
+          url: 'https://example.com/large.jpg',
+          roles: ['picture-source' as const],
+          naturalWidth: 1920,
+          naturalHeight: 1080,
+        },
+      ];
+      expect(pickBestVariantUrl(variants)).toBe('https://example.com/large.jpg');
+    });
+
+    it('falls back to current-src or first variant when no differentiation', () => {
+      const variants = [
+        {
+          url: 'https://example.com/pic.jpg',
+          roles: ['current-src' as const],
+        },
+      ];
+      expect(pickBestVariantUrl(variants)).toBe('https://example.com/pic.jpg');
     });
   });
 });

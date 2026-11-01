@@ -2,7 +2,7 @@ import {
   ALLOWED_IMAGE_PROTOCOLS,
   LIKELY_IMAGE_PATH_EXTENSIONS,
 } from './constants';
-import type { ImageFormat } from './types';
+import type { ImageFormat, VariantRole } from './types';
 
 /**
  * Resolves a raw URL against a base URI and validates its scheme against allowed protocols.
@@ -130,7 +130,9 @@ export function extractCssBackgroundUrls(
 
 /**
  * Determines whether an enclosing `<a href="...">` target is likely an image file.
- * Checks `URL.pathname` case-insensitively against known extensions (`spec.md` MVP-04, §6.1).
+ * Checks `URL.pathname` case-insensitively against known extensions (`spec.md` MVP-04, §6.1),
+ * supports trailing slashes (e.g. `/image.jpg/`), colon modifiers (`:large`), CDN transforms,
+ * and format query parameters.
  */
 export function isLikelyImageLinkHref(urlStr: string): boolean {
   try {
@@ -139,13 +141,41 @@ export function isLikelyImageLinkHref(urlStr: string): boolean {
       return false;
     }
     const path = parsed.pathname.toLowerCase();
-    // Check standard extension at end or before CDN preset modifiers like !sml, !lrg, !preview
-    const cleanPath = path.split('!')[0] ?? path;
+    // Strip trailing slashes and clean CDN modifiers like !sml, !lrg, !preview, and :large
+    const trimmedPath = path.replace(/\/+$/, '');
+    const cleanPath = trimmedPath.split('!')[0]?.split(':')[0] ?? trimmedPath;
+
     for (const ext of LIKELY_IMAGE_PATH_EXTENSIONS) {
       if (cleanPath.endsWith(ext)) {
         return true;
       }
     }
+
+    // Check if path has image extension followed by a path slash or separator (e.g. /get_image/.../photo.jpg/1200)
+    if (/\.(jpe?g|png|gif|webp|avif|svg|bmp|ico|tiff?)(?:[\/:\s]|$)/i.test(path)) {
+      return true;
+    }
+
+    // Check query params commonly indicating image formats
+    for (const param of ['format', 'fm', 'ext', 'auto', 'type', 'mime']) {
+      const val = parsed.searchParams.get(param)?.toLowerCase();
+      if (val) {
+        if (/^(jpe?g|png|gif|webp|avif|svg|bmp|ico)$/.test(val)) {
+          return true;
+        }
+        if (val.startsWith('image/')) {
+          return true;
+        }
+      }
+    }
+
+    // Check if search contains image filename (e.g. ?file=pic.jpg or ?url=...pic.jpg)
+    for (const [, val] of parsed.searchParams.entries()) {
+      if (/\.(jpe?g|png|gif|webp|avif|svg|bmp|ico)(?:[?&#\s]|$)/i.test(val)) {
+        return true;
+      }
+    }
+
     return false;
   } catch {
     return false;
@@ -157,7 +187,7 @@ export function isLikelyImageLinkHref(urlStr: string): boolean {
  * Priority:
  * 1. `data:` MIME header
  * 2. `mimeHint` (<source type="...">)
- * 3. File extension in URL pathname (supports !preset suffixes like .jpeg!sml)
+ * 3. File extension in URL pathname (supports !preset suffixes like .jpeg!sml, trailing slashes, :modifiers)
  * 4. Common format query parameters (`?format=webp`, `?fm=jpg`, etc.)
  */
 export function inferImageFormat(
@@ -179,27 +209,31 @@ export function inferImageFormat(
 
   try {
     const parsed = new URL(urlStr);
-    const path = (parsed.pathname.split('!')[0] ?? parsed.pathname).toLowerCase();
+    const trimmedPath = parsed.pathname.replace(/\/+$/, '');
+    const path = (trimmedPath.split('!')[0]?.split(':')[0] ?? trimmedPath).toLowerCase();
 
-    if (/\.(jpe?g)$/.test(path)) return 'jpeg';
-    if (/\.png$/.test(path)) return 'png';
-    if (/\.gif$/.test(path)) return 'gif';
-    if (/\.webp$/.test(path)) return 'webp';
-    if (/\.svg$/.test(path)) return 'svg';
-    if (/\.avif$/.test(path)) return 'avif';
-    if (/\.bmp$/.test(path)) return 'bmp';
-    if (/\.ico$/.test(path)) return 'ico';
+    if (/\.(jpe?g)(?:[\/:\s]|$)/i.test(path)) return 'jpeg';
+    if (/\.png(?:[\/:\s]|$)/i.test(path)) return 'png';
+    if (/\.gif(?:[\/:\s]|$)/i.test(path)) return 'gif';
+    if (/\.webp(?:[\/:\s]|$)/i.test(path)) return 'webp';
+    if (/\.svg(?:[\/:\s]|$)/i.test(path)) return 'svg';
+    if (/\.avif(?:[\/:\s]|$)/i.test(path)) return 'avif';
+    if (/\.bmp(?:[\/:\s]|$)/i.test(path)) return 'bmp';
+    if (/\.ico(?:[\/:\s]|$)/i.test(path)) return 'ico';
+    if (/\.tiff?(?:[\/:\s]|$)/i.test(path)) return 'unknown';
 
     // Check query params used by common CDNs (e.g. format=webp, fm=jpg, ext=png)
-    for (const param of ['format', 'fm', 'ext', 'auto']) {
+    for (const param of ['format', 'fm', 'ext', 'auto', 'type', 'mime']) {
       const val = parsed.searchParams.get(param)?.toLowerCase();
       if (val) {
-        if (val === 'jpg' || val === 'jpeg') return 'jpeg';
-        if (val === 'png') return 'png';
-        if (val === 'webp') return 'webp';
-        if (val === 'avif') return 'avif';
-        if (val === 'gif') return 'gif';
-        if (val === 'svg') return 'svg';
+        if (val === 'jpg' || val === 'jpeg' || val === 'image/jpeg') return 'jpeg';
+        if (val === 'png' || val === 'image/png') return 'png';
+        if (val === 'webp' || val === 'image/webp') return 'webp';
+        if (val === 'avif' || val === 'image/avif') return 'avif';
+        if (val === 'gif' || val === 'image/gif') return 'gif';
+        if (val === 'svg' || val === 'image/svg+xml') return 'svg';
+        if (val === 'bmp' || val === 'image/bmp') return 'bmp';
+        if (val === 'ico' || val === 'image/x-icon') return 'ico';
       }
     }
   } catch {
@@ -234,4 +268,83 @@ function normalizeMimeSubtype(subtype: string): ImageFormat {
     default:
       return 'unknown';
   }
+}
+
+/**
+ * Selects the optimal high-resolution variant URL for a candidate group.
+ * Priority:
+ * 1. `link-target` (enclosing modal / full-size link from gallery thumbnail)
+ * 2. Highest `srcset` descriptor (e.g. 3x > 2x, or largest width 2000w > 1000w)
+ * 3. Largest known natural pixel dimensions
+ * 4. `current-src` / `src` / fallback to first
+ */
+export function pickBestVariantUrl(
+  variants: Array<{
+    url: string;
+    roles: VariantRole[];
+    descriptors?: string[];
+    naturalWidth?: number | null;
+    naturalHeight?: number | null;
+  }>,
+): string {
+  if (variants.length === 0) return '';
+  if (variants.length === 1) return variants[0]!.url;
+
+  // 1. Prioritize link-target (modal / full size image link enclosing thumbnail)
+  const linkTarget = variants.find((v) => v.roles.includes('link-target'));
+  if (linkTarget) {
+    return linkTarget.url;
+  }
+
+  // 2. Prioritize srcset descriptor (3x > 2x, or largest width)
+  let bestDescScore = -1;
+  let bestDescUrl: string | null = null;
+  for (const v of variants) {
+    for (const d of v.descriptors || []) {
+      const wMatch = /^(\d+)w$/i.exec(d.trim());
+      if (wMatch?.[1]) {
+        const width = Number(wMatch[1]);
+        if (width > bestDescScore) {
+          bestDescScore = width;
+          bestDescUrl = v.url;
+        }
+      }
+      const xMatch = /^([\d.]+)x$/i.exec(d.trim());
+      if (xMatch?.[1]) {
+        const density = Number(xMatch[1]) * 1000;
+        if (density > bestDescScore) {
+          bestDescScore = density;
+          bestDescUrl = v.url;
+        }
+      }
+    }
+  }
+  if (bestDescUrl && bestDescScore > 1000) {
+    return bestDescUrl;
+  }
+
+  // 3. Prioritize largest known natural pixel dimensions
+  let maxArea = 0;
+  let bestAreaUrl: string | null = null;
+  for (const v of variants) {
+    if (v.naturalWidth && v.naturalHeight) {
+      const area = v.naturalWidth * v.naturalHeight;
+      if (area > maxArea) {
+        maxArea = area;
+        bestAreaUrl = v.url;
+      }
+    }
+  }
+  if (bestAreaUrl && maxArea > 0) {
+    return bestAreaUrl;
+  }
+
+  // 4. Fallback to current-src or src or first variant
+  const currentSrc = variants.find((v) => v.roles.includes('current-src'));
+  if (currentSrc) return currentSrc.url;
+
+  const src = variants.find((v) => v.roles.includes('src'));
+  if (src) return src.url;
+
+  return variants[0]!.url;
 }

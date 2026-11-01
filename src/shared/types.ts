@@ -104,6 +104,8 @@ export interface ImageItem {
   occurrenceCount: number;
   /** First seen DOM order index; list order is ascending by `firstSeenOrder` (`spec.md` §4.3). */
   firstSeenOrder: number;
+  /** Whether the user manually chose a variant from the card dropdown. */
+  manualVariantSelected?: boolean;
 }
 
 /** Lifecycle status of a tab's scan session (`design.md` §3.2). */
