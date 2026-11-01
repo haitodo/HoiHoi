@@ -1,24 +1,30 @@
 import React, { useState } from 'react';
-import type { ImageItem, ItemDownloadState } from '@shared/types';
+import type { CardSize, ImageItem, ItemDownloadState } from '@shared/types';
 
 interface ImageCardProps {
   item: ImageItem;
   isSelected: boolean;
   downloadState?: ItemDownloadState;
+  thumbnailHeight?: number;
+  cardSize?: CardSize;
   onToggleSelect: () => void;
   onSelectVariant: (variantUrl: string) => void;
   onReportDimensions: (variantUrl: string, width: number, height: number) => void;
   onDownload: () => void;
+  onOpenPreview?: () => void;
 }
 
 export const ImageCard: React.FC<ImageCardProps> = ({
   item,
   isSelected,
   downloadState,
+  thumbnailHeight = 120,
+  cardSize = 'medium',
   onToggleSelect,
   onSelectVariant,
   onReportDimensions,
   onDownload,
+  onOpenPreview,
 }) => {
   const [imgError, setImgError] = useState(false);
   const [useThumbnailFallback, setUseThumbnailFallback] = useState(false);
@@ -62,6 +68,10 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   return (
     <div
       onClick={onToggleSelect}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onOpenPreview?.();
+      }}
       style={{
         border: `2px solid ${isSelected ? '#4f46e5' : '#e5e7eb'}`,
         borderRadius: 8,
@@ -69,6 +79,8 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
+        height: '100%',
+        boxSizing: 'border-box',
         cursor: 'pointer',
         position: 'relative',
         transition: 'border-color 0.15s ease',
@@ -96,6 +108,37 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           style={{ cursor: 'pointer', margin: 0 }}
         />
       </div>
+
+      {/* Quick Preview Button (Top Right) */}
+      {onOpenPreview && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenPreview();
+          }}
+          style={{
+            position: 'absolute',
+            top: 6,
+            right: item.occurrenceCount > 1 ? 38 : 6,
+            zIndex: 3,
+            backgroundColor: 'rgba(255, 255, 255, 0.92)',
+            border: '1px solid rgba(0, 0, 0, 0.12)',
+            borderRadius: 4,
+            padding: '2px 5px',
+            fontSize: 10,
+            lineHeight: 1,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.12)',
+          }}
+          title="クリックで拡大プレビューを開く（ダブルクリックでも可）"
+        >
+          🔍
+        </button>
+      )}
 
       {/* Occurrence Badge (Top Right) */}
       {item.occurrenceCount > 1 && (
@@ -156,12 +199,13 @@ export const ImageCard: React.FC<ImageCardProps> = ({
       <div
         style={{
           width: '100%',
-          height: 120,
+          height: thumbnailHeight,
           backgroundColor: '#f3f4f6',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           overflow: 'hidden',
+          flexShrink: 0,
         }}
       >
         {imgError ? (
@@ -209,114 +253,306 @@ export const ImageCard: React.FC<ImageCardProps> = ({
       </div>
 
       {/* Card Info and Actions */}
-      <div style={{ padding: '6px 8px', fontSize: 11, backgroundColor: '#ffffff' }}>
-        {/* Dimensions & Format */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            color: '#4b5563',
-            fontSize: 10,
-            marginBottom: 4,
-          }}
-        >
-          <span>{dimsText}</span>
-          <span style={{ fontWeight: 600 }}>{formatText}</span>
-        </div>
-
-        {/* Variant selector dropdown if item has multiple candidates */}
-        {item.variants.length > 1 && (
-          <div style={{ marginBottom: 6 }} onClick={(e) => e.stopPropagation()}>
-            <select
-              value={selectedUrl}
-              onChange={(e) => onSelectVariant(e.target.value)}
+      <div
+        style={{
+          padding: cardSize === 'small' ? '4px 6px' : '6px 8px',
+          fontSize: 11,
+          backgroundColor: '#ffffff',
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          justifyContent: 'space-between',
+          minWidth: 0,
+          boxSizing: 'border-box',
+        }}
+      >
+        <div>
+          {/* Dimensions & Format */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              color: '#4b5563',
+              fontSize: cardSize === 'small' ? 9 : 10,
+              marginBottom: 4,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              lineHeight: 1.2,
+            }}
+          >
+            <span
               style={{
-                width: '100%',
-                fontSize: 10,
-                padding: '2px 4px',
-                border: '1px solid #d1d5db',
-                borderRadius: 4,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={dimsText}
+            >
+              {dimsText}
+            </span>
+            <span
+              style={{
+                fontWeight: 600,
+                marginLeft: 4,
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
               }}
             >
-              {item.variants.map((v, idx) => {
-                const desc = v.descriptors.length > 0 ? ` (${v.descriptors.join(', ')})` : '';
-                const roleLabel = v.roles.includes('link-target')
-                  ? '高解像度（リンク先）'
-                  : v.roles.includes('current-src')
-                    ? '表示画像'
-                    : `候補 ${idx + 1}`;
-                return (
-                  <option key={v.url} value={v.url}>
-                    {roleLabel}
-                    {desc}
-                  </option>
-                );
-              })}
-            </select>
+              {formatText}
+            </span>
           </div>
-        )}
+
+          {/* Variant selector dropdown if item has multiple candidates */}
+          {item.variants.length > 1 && (
+            <div style={{ marginBottom: 4 }} onClick={(e) => e.stopPropagation()}>
+              <select
+                value={selectedUrl}
+                onChange={(e) => onSelectVariant(e.target.value)}
+                style={{
+                  width: '100%',
+                  fontSize: cardSize === 'small' ? 9 : 10,
+                  padding: '1px 3px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: 4,
+                  backgroundColor: '#ffffff',
+                  cursor: 'pointer',
+                }}
+              >
+                {item.variants.map((v, idx) => {
+                  const desc = v.descriptors.length > 0 ? ` (${v.descriptors.join(', ')})` : '';
+                  const roleLabel = v.roles.includes('link-target')
+                    ? '高解像度'
+                    : v.roles.includes('current-src')
+                      ? '表示画像'
+                      : `候補 ${idx + 1}`;
+                  return (
+                    <option key={v.url} value={v.url}>
+                      {roleLabel}
+                      {desc}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
+        </div>
 
         {/* Action Buttons */}
         <div
           style={{
             display: 'flex',
-            gap: 4,
-            justifyContent: 'space-between',
-            marginTop: 4,
+            gap: cardSize === 'small' ? 3 : 4,
+            alignItems: 'center',
+            marginTop: 'auto',
+            flexWrap: 'nowrap',
+            width: '100%',
+            boxSizing: 'border-box',
           }}
         >
-          <button
-            type="button"
-            onClick={handleDownloadClick}
-            style={{
-              flex: 1,
-              padding: '2px 4px',
-              fontSize: 10,
-              backgroundColor: '#eef2ff',
-              color: '#4338ca',
-              border: '1px solid #c7d2fe',
-              borderRadius: 4,
-              cursor: 'pointer',
-              fontWeight: 500,
-            }}
-            title="この画像を保存"
-          >
-            保存
-          </button>
+          {cardSize === 'small' ? (
+            // Small mode: 2 compact buttons to prevent text wrapping and vertical expansion
+            <>
+              <button
+                type="button"
+                onClick={handleDownloadClick}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  padding: '3px 2px',
+                  fontSize: 10,
+                  backgroundColor: '#eef2ff',
+                  color: '#4338ca',
+                  border: '1px solid #c7d2fe',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  lineHeight: 1.2,
+                }}
+                title="この画像を保存"
+              >
+                保存
+              </button>
 
-          <button
-            type="button"
-            onClick={handleOpenOriginal}
-            style={{
-              padding: '2px 6px',
-              fontSize: 10,
-              backgroundColor: '#f3f4f6',
-              color: '#374151',
-              border: '1px solid #d1d5db',
-              borderRadius: 4,
-              cursor: 'pointer',
-            }}
-            title="新しいタブで画像を開く"
-          >
-            開く
-          </button>
+              <button
+                type="button"
+                onClick={handleOpenOriginal}
+                style={{
+                  flexShrink: 0,
+                  padding: '3px 6px',
+                  fontSize: 10,
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  lineHeight: 1.2,
+                }}
+                title="新しいタブで画像を開く"
+              >
+                ↗
+              </button>
+            </>
+          ) : cardSize === 'large' ? (
+            // Large mode: Spacious bar with all 4 actions labeled
+            <>
+              <button
+                type="button"
+                onClick={handleDownloadClick}
+                style={{
+                  flex: 1.2,
+                  minWidth: 0,
+                  padding: '5px 8px',
+                  fontSize: 11,
+                  backgroundColor: '#eef2ff',
+                  color: '#4338ca',
+                  border: '1px solid #c7d2fe',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+                title="この画像を保存"
+              >
+                💾 保存
+              </button>
 
-          <button
-            type="button"
-            onClick={handleCopyUrl}
-            style={{
-              padding: '2px 6px',
-              fontSize: 10,
-              backgroundColor: copied ? '#dcfce7' : '#f3f4f6',
-              color: copied ? '#166534' : '#374151',
-              border: '1px solid #d1d5db',
-              borderRadius: 4,
-              cursor: 'pointer',
-            }}
-            title="画像URLをクリップボードにコピー"
-          >
-            {copied ? '済' : 'コピー'}
-          </button>
+              {onOpenPreview && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenPreview();
+                  }}
+                  style={{
+                    flexShrink: 0,
+                    padding: '5px 8px',
+                    fontSize: 11,
+                    backgroundColor: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title="拡大プレビュー（前後の送り確認も可能）"
+                >
+                  🔍 拡大
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleOpenOriginal}
+                style={{
+                  flexShrink: 0,
+                  padding: '5px 8px',
+                  fontSize: 11,
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+                title="新しいタブで画像を開く"
+              >
+                別タブ
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopyUrl}
+                style={{
+                  flexShrink: 0,
+                  padding: '5px 8px',
+                  fontSize: 11,
+                  backgroundColor: copied ? '#dcfce7' : '#f3f4f6',
+                  color: copied ? '#166534' : '#374151',
+                  border: '1px solid #d1d5db',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+                title="画像URLをクリップボードにコピー"
+              >
+                {copied ? 'コピー済' : 'コピー'}
+              </button>
+            </>
+          ) : (
+            // Medium / Auto mode: Clean 3-button layout (Preview is in top-right 🔍)
+            <>
+              <button
+                type="button"
+                onClick={handleDownloadClick}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  padding: '3px 4px',
+                  fontSize: 10,
+                  backgroundColor: '#eef2ff',
+                  color: '#4338ca',
+                  border: '1px solid #c7d2fe',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  lineHeight: 1.2,
+                }}
+                title="この画像を保存"
+              >
+                保存
+              </button>
+
+              <button
+                type="button"
+                onClick={handleOpenOriginal}
+                style={{
+                  flexShrink: 0,
+                  padding: '3px 6px',
+                  fontSize: 10,
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  lineHeight: 1.2,
+                }}
+                title="新しいタブで画像を開く"
+              >
+                開く
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopyUrl}
+                style={{
+                  flexShrink: 0,
+                  padding: '3px 6px',
+                  fontSize: 10,
+                  backgroundColor: copied ? '#dcfce7' : '#f3f4f6',
+                  color: copied ? '#166534' : '#374151',
+                  border: '1px solid #d1d5db',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  lineHeight: 1.2,
+                }}
+                title="画像URLをクリップボードにコピー"
+              >
+                {copied ? '済' : 'コピー'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { extractFilenameForSort } from '@shared/filename-utils';
-import type { FilterState, ImageItem, SortOrder } from '@shared/types';
+import type { CardSize, FilterState, ImageItem, SortOrder } from '@shared/types';
 import { DownloadFooter } from './components/DownloadFooter';
 import { EmptyOrStatusView } from './components/EmptyOrStatusView';
 import { FilterBar } from './components/FilterBar';
 import { Header } from './components/Header';
 import { ImageGrid } from './components/ImageGrid';
+import { ImageLightboxModal } from './components/ImageLightboxModal';
 import { SelectionToolbar } from './components/SelectionToolbar';
 import { useActiveTabId } from './hooks/useActiveTabId';
 import { useTabSession } from './hooks/useTabSession';
@@ -92,6 +93,7 @@ export function App() {
     setFilterState(DEFAULT_FILTER);
     saveFilterPreferences(DEFAULT_FILTER);
   }, []);
+
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => {
     try {
       const saved = localStorage.getItem('wic_sort_order');
@@ -116,6 +118,30 @@ export function App() {
       localStorage.setItem('wic_sort_order', nextOrder);
     } catch {}
   }, []);
+
+  const [cardSize, setCardSize] = useState<CardSize>(() => {
+    try {
+      const saved = localStorage.getItem('wic_card_size');
+      if (
+        saved === 'auto' ||
+        saved === 'small' ||
+        saved === 'medium' ||
+        saved === 'large'
+      ) {
+        return saved;
+      }
+    } catch {}
+    return 'auto';
+  });
+
+  const handleCardSizeChange = useCallback((size: CardSize) => {
+    setCardSize(size);
+    try {
+      localStorage.setItem('wic_card_size', size);
+    } catch {}
+  }, []);
+
+  const [previewItemId, setPreviewItemId] = useState<string | null>(null);
 
   const rawItems = snapshot?.items || [];
   const selectedIdsSet = useMemo(() => new Set(snapshot?.selectedIds || []), [snapshot?.selectedIds]);
@@ -253,6 +279,13 @@ export function App() {
   const visibleItemIds = useMemo(() => filteredItems.map((i) => i.itemId), [filteredItems]);
   const visibleItemIdsSet = useMemo(() => new Set(visibleItemIds), [visibleItemIds]);
 
+  const previewItemIndex = useMemo(() => {
+    if (!previewItemId) return -1;
+    return filteredItems.findIndex((item) => item.itemId === previewItemId);
+  }, [previewItemId, filteredItems]);
+
+  const previewItem = previewItemIndex >= 0 ? filteredItems[previewItemIndex] : null;
+
   const hiddenSelectedCount = useMemo(() => {
     let count = 0;
     for (const id of selectedIdsSet) {
@@ -315,6 +348,8 @@ export function App() {
             hiddenSelectedCount={hiddenSelectedCount}
             visibleCount={filteredItems.length}
             hasVariants={hasVariants}
+            cardSize={cardSize}
+            onCardSizeChange={handleCardSizeChange}
             onSelectVisible={() => selectAllVisible(visibleItemIds)}
             onClearAll={clearAllSelection}
             onDownloadSelected={() => enqueueDownloads(Array.from(selectedIdsSet))}
@@ -336,10 +371,12 @@ export function App() {
           items={filteredItems}
           selectedIds={selectedIdsSet}
           downloads={snapshot?.downloads || {}}
+          cardSize={cardSize}
           onToggleSelect={toggleSelection}
           onSelectVariant={selectVariant}
           onReportDimensions={reportThumbDimensions}
           onDownloadItem={(itemId) => enqueueDownloads([itemId])}
+          onOpenPreview={(item) => setPreviewItemId(item.itemId)}
         />
       )}
 
@@ -347,6 +384,23 @@ export function App() {
         downloads={snapshot?.downloads || {}}
         onRetryFailed={retryFailedDownloads}
       />
+
+      {previewItem && (
+        <ImageLightboxModal
+          items={filteredItems}
+          currentIndex={previewItemIndex}
+          isSelected={selectedIdsSet.has(previewItem.itemId)}
+          downloadState={snapshot?.downloads[previewItem.itemId]}
+          onClose={() => setPreviewItemId(null)}
+          onNavigate={(index) => {
+            const next = filteredItems[index];
+            if (next) setPreviewItemId(next.itemId);
+          }}
+          onToggleSelect={toggleSelection}
+          onDownload={(itemId) => enqueueDownloads([itemId])}
+          onSelectVariant={selectVariant}
+        />
+      )}
     </div>
   );
 }

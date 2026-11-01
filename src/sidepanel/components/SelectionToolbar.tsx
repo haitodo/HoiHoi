@@ -1,10 +1,13 @@
 import React from 'react';
+import type { CardSize } from '@shared/types';
 
 interface SelectionToolbarProps {
   selectedCount: number;
   hiddenSelectedCount: number;
   visibleCount: number;
   hasVariants?: boolean;
+  cardSize?: CardSize;
+  onCardSizeChange?: (size: CardSize) => void;
   onSelectVisible: () => void;
   onClearAll: () => void;
   onDownloadSelected: () => void;
@@ -16,6 +19,8 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   hiddenSelectedCount,
   visibleCount,
   hasVariants,
+  cardSize = 'medium',
+  onCardSizeChange,
   onSelectVisible,
   onClearAll,
   onDownloadSelected,
@@ -36,14 +41,100 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
         flexWrap: 'wrap',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontWeight: 600, color: '#111827' }}>
-          選択中: {selectedCount} 件
-        </span>
-        {hiddenSelectedCount > 0 && (
-          <span style={{ color: '#d97706', fontSize: 11 }}>
-            (非表示 {hiddenSelectedCount}件)
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontWeight: 600, color: '#111827' }}>
+            選択中: {selectedCount} 件
           </span>
+          {hiddenSelectedCount > 0 && (
+            <span style={{ color: '#d97706', fontSize: 11 }}>
+              (非表示 {hiddenSelectedCount}件)
+            </span>
+          )}
+        </div>
+
+        {onCardSizeChange && (
+          <div
+            style={{
+              display: 'inline-flex',
+              borderRadius: 4,
+              border: '1px solid #d1d5db',
+              overflow: 'hidden',
+              backgroundColor: '#ffffff',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => onCardSizeChange('auto')}
+              style={{
+                padding: '2px 7px',
+                fontSize: 10,
+                backgroundColor: cardSize === 'auto' ? '#4f46e5' : '#ffffff',
+                color: cardSize === 'auto' ? '#ffffff' : '#4b5563',
+                border: 'none',
+                borderRight: '1px solid #d1d5db',
+                cursor: 'pointer',
+                fontWeight: cardSize === 'auto' ? 600 : 400,
+                whiteSpace: 'nowrap',
+              }}
+              title="自動調整（パネル幅に合わせて2〜5列レスポンシブ配置）"
+            >
+              自動
+            </button>
+            <button
+              type="button"
+              onClick={() => onCardSizeChange('small')}
+              style={{
+                padding: '2px 6px',
+                fontSize: 10,
+                backgroundColor: cardSize === 'small' ? '#4f46e5' : '#ffffff',
+                color: cardSize === 'small' ? '#ffffff' : '#4b5563',
+                border: 'none',
+                borderRight: '1px solid #d1d5db',
+                cursor: 'pointer',
+                fontWeight: cardSize === 'small' ? 600 : 400,
+                whiteSpace: 'nowrap',
+              }}
+              title="小サイズ表示（一覧性重視・3〜5列）"
+            >
+              小
+            </button>
+            <button
+              type="button"
+              onClick={() => onCardSizeChange('medium')}
+              style={{
+                padding: '2px 6px',
+                fontSize: 10,
+                backgroundColor: cardSize === 'medium' ? '#4f46e5' : '#ffffff',
+                color: cardSize === 'medium' ? '#ffffff' : '#4b5563',
+                border: 'none',
+                borderRight: '1px solid #d1d5db',
+                cursor: 'pointer',
+                fontWeight: cardSize === 'medium' ? 600 : 400,
+                whiteSpace: 'nowrap',
+              }}
+              title="中サイズ表示（標準・2〜3列）"
+            >
+              中
+            </button>
+            <button
+              type="button"
+              onClick={() => onCardSizeChange('large')}
+              style={{
+                padding: '2px 6px',
+                fontSize: 10,
+                backgroundColor: cardSize === 'large' ? '#4f46e5' : '#ffffff',
+                color: cardSize === 'large' ? '#ffffff' : '#4b5563',
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: cardSize === 'large' ? 600 : 400,
+                whiteSpace: 'nowrap',
+              }}
+              title="大サイズ表示（詳細重視・サイドバー幅に合わせた特大表示）"
+            >
+              大
+            </button>
+          </div>
         )}
       </div>
 

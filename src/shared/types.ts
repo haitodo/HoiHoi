@@ -164,6 +164,9 @@ export type SortOrder =
   | 'filename_desc'  // ファイル名 (Z-A / 連番降順)
   | 'selected_first'; // 選択中を先頭
 
+/** Thumbnail display size mode in Side Panel. */
+export type CardSize = 'auto' | 'small' | 'medium' | 'large';
+
 /** Side Panel filter criteria (`spec.md` §4.1, MVP-11, MVP-12, MVP-13). */
 export interface FilterState {
   /** Case-insensitive substring query matched against `item.selectedUrl` (`spec.md` MVP-13). */
