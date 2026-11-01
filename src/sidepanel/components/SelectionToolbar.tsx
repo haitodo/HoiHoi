@@ -1,10 +1,12 @@
 import React from 'react';
-import type { CardSize } from '@shared/types';
+import type { CardSize, MediaMode } from '@shared/types';
 
 interface SelectionToolbarProps {
+  mediaMode?: MediaMode;
   selectedCount: number;
   hiddenSelectedCount: number;
   visibleCount: number;
+  selectableVisibleCount?: number;
   hasVariants?: boolean;
   cardSize?: CardSize;
   onCardSizeChange?: (size: CardSize) => void;
@@ -15,9 +17,11 @@ interface SelectionToolbarProps {
 }
 
 export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
+  mediaMode = 'image',
   selectedCount,
   hiddenSelectedCount,
   visibleCount,
+  selectableVisibleCount,
   hasVariants,
   cardSize = 'medium',
   onCardSizeChange,
@@ -26,6 +30,8 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   onDownloadSelected,
   onApplyVariantPreference,
 }) => {
+  const effectiveSelectableCount = selectableVisibleCount ?? visibleCount;
+  const mediaNoun = mediaMode === 'video' ? '動画' : '画像';
   return (
     <div
       style={{
@@ -153,16 +159,16 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
               cursor: 'pointer',
               fontWeight: 500,
             }}
-            title="モーダルリンク先や高解像度候補に一括切替します"
+            title={`最高画質の保存可能な${mediaNoun}候補に一括切替します`}
           >
-            高解像度を一括適用
+            {mediaMode === 'video' ? '高画質を一括適用' : '高解像度を一括適用'}
           </button>
         )}
 
         <button
           type="button"
           onClick={onSelectVisible}
-          disabled={visibleCount === 0}
+          disabled={effectiveSelectableCount === 0}
           style={{
             padding: '3px 8px',
             fontSize: 11,
@@ -170,11 +176,11 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
             borderRadius: 4,
             backgroundColor: 'var(--color-bg-subtle)',
             color: 'var(--color-text-primary)',
-            cursor: visibleCount === 0 ? 'not-allowed' : 'pointer',
+            cursor: effectiveSelectableCount === 0 ? 'not-allowed' : 'pointer',
           }}
-          title="現在フィルターされて画面に表示されている画像をすべて選択します"
+          title={`現在フィルターされて保存条件を満たす${mediaNoun}をすべて選択します`}
         >
-          表示中を全選択 ({visibleCount}件)
+          表示中を全選択 ({effectiveSelectableCount}件)
         </button>
 
         <button

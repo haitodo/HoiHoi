@@ -1,7 +1,9 @@
+import { PORT_NAMES } from '@shared/constants';
 import {
   isContentToBgMessage,
   isPanelToBgMessage,
   type BackgroundToPanelEvent,
+  type MessageResult,
 } from '@shared/messages';
 import { downloadManager } from './download-manager';
 import { sessionStore } from './session-store';
@@ -50,7 +52,7 @@ chrome.action.onClicked.addListener((tab) => {
 
 // Connect port listener to track Side Panel lifecycle
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name === 'hoihoi-sidepanel') {
+  if (port.name === PORT_NAMES.SIDEPANEL_LIFECYCLE) {
     port.onDisconnect.addListener(() => {
       // Side Panel closed -> stop observers across tracked tabs to eliminate idle load
       void stopAllScanners();
@@ -81,12 +83,23 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 
         switch (message.type) {
           case 'CONTENT_SCAN_BATCH': {
-            sessionStore.mergeCandidateGroups(
-              tabId,
-              message.scanEpoch,
-              message.groups,
-              message.pageTitle,
-            );
+            if (message.groups.length > 0) {
+              sessionStore.mergeCandidateGroups(
+                tabId,
+                message.scanEpoch,
+                message.groups,
+                message.pageTitle,
+              );
+            }
+            if (message.videoGroups && message.videoGroups.length > 0) {
+              sessionStore.mergeVideoCandidateGroups(
+                tabId,
+                message.scanEpoch,
+                message.videoGroups,
+                message.pageUrl,
+                message.pageTitle,
+              );
+            }
             sendResponse({ ok: true });
             break;
           }
@@ -105,6 +118,19 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
               message.naturalWidth,
               message.naturalHeight,
             );
+            sendResponse({ ok: true });
+            break;
+          }
+          case 'CONTENT_VIDEO_METADATA_LOADED': {
+            sessionStore.updateVideoMetadata(tabId, {
+              url: message.url,
+              videoWidth: message.videoWidth,
+              videoHeight: message.videoHeight,
+              durationSec: message.durationSec,
+              isLive: message.isLive,
+              posterUrl: message.posterUrl,
+              isDrmProtected: message.isDrmProtected,
+            });
             sendResponse({ ok: true });
             break;
           }
@@ -137,12 +163,11 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
         switch (message.type) {
           case 'PANEL_GET_TAB_SESSION': {
             let snapshot = sessionStore.getSnapshot(tabId);
-            // If session was unscanned and pageUrl is empty, try populating current tab info
             if (snapshot.scanStatus === 'unscanned' && !snapshot.pageUrl && tabId > 0) {
               try {
                 const tab = await chrome.tabs.get(tabId);
                 if (tab.url) {
-                  const session = sessionStore.getOrCreateSession(tabId, tab.url);
+                  sessionStore.getOrCreateSession(tabId, tab.url);
                   snapshot = sessionStore.getSnapshot(tabId);
                 }
               } catch {}
@@ -158,8 +183,12 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
           }
 
           case 'PANEL_UPDATE_SELECTION': {
-            const selectedIds = sessionStore.updateSelection(tabId, message.mutation);
-            sendResponse({ ok: true, data: selectedIds });
+            const updatedIds = sessionStore.updateSelection(
+              tabId,
+              message.mutation,
+              message.mediaMode,
+            );
+            sendResponse({ ok: true, data: updatedIds });
             break;
           }
 
@@ -174,6 +203,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
               tabId,
               message.target,
               message.itemIds,
+              message.mediaMode,
             );
             sendResponse({ ok });
             break;
@@ -190,14 +220,93 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
             break;
           }
 
+          case 'PANEL_REPORT_VIDEO_METADATA': {
+            sessionStore.updateVideoMetadata(tabId, {
+              url: message.variantUrl,
+              videoWidth: message.videoWidth,
+              videoHeight: message.videoHeight,
+              durationSec: message.durationSec,
+            });
+            sendResponse({ ok: true });
+            break;
+          }
+
+          case 'PANEL_RESOLVE_HLS_MANIFEST': {
+            let manifestText: string | null = null;
+            // 1. Try page context first so cookies/origin headers match
+            try {
+              const csRes = (await chrome.tabs.sendMessage(tabId, {
+                channel: 'WIC_BG_TO_CONTENT',
+                type: 'BG_FETCH_TEXT_ON_DEMAND',
+                url: message.manifestUrl,
+                maxChars: 512_000,
+              })) as MessageResult<string>;
+              if (csRes?.ok && csRes.data) {
+                manifestText = csRes.data;
+              }
+            } catch {}
+
+            // 2. Fallback to extension fetch if cross-origin CDN blocked page CORS
+            if (!manifestText) {
+              const resp = await fetch(message.manifestUrl);
+              if (!resp.ok) {
+                sendResponse({
+                  ok: false,
+                  error: `プレイリストの取得に失敗しました (HTTP ${resp.status})`,
+                });
+                break;
+              }
+              manifestText = (await resp.text()).slice(0, 512_000);
+            }
+
+            const result = sessionStore.applyParsedHlsManifest(
+              tabId,
+              message.itemId,
+              message.manifestUrl,
+              manifestText,
+            );
+            sendResponse({ ok: true, data: result });
+            break;
+          }
+
           case 'PANEL_ENQUEUE_DOWNLOADS': {
             downloadManager.enqueue(tabId, message.itemIds);
             sendResponse({ ok: true });
             break;
           }
 
+          case 'PANEL_CANCEL_DOWNLOAD': {
+            const ok = await downloadManager.cancelDownload(tabId, message.itemId);
+            sendResponse({ ok });
+            break;
+          }
+
+          case 'PANEL_SAVE_CAPTURED_FRAME': {
+            const ok = await downloadManager.saveCapturedFrame({
+              tabId,
+              dataUrl: message.dataUrl,
+              sourceVideoUrl: message.sourceVideoUrl,
+              timestampSec: message.timestampSec,
+            });
+            sendResponse({ ok });
+            break;
+          }
+
+          case 'PANEL_SAVE_ASSEMBLED_STREAM': {
+            const ok = await downloadManager.saveAssembledStream({
+              tabId,
+              itemId: message.itemId,
+              objectUrl: message.objectUrl,
+              sourceManifestUrl: message.sourceManifestUrl,
+              containerExtension: message.containerExtension,
+              totalBytes: message.totalBytes,
+            });
+            sendResponse({ ok });
+            break;
+          }
+
           case 'PANEL_RETRY_FAILED_DOWNLOADS': {
-            downloadManager.retryFailed(tabId, message.itemIds);
+            downloadManager.retryFailed(tabId, message.itemIds, message.mediaMode);
             sendResponse({ ok: true });
             break;
           }

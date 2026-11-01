@@ -1,17 +1,37 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { PORT_NAMES } from '@shared/constants';
 import { extractFilenameForSort } from '@shared/filename-utils';
-import type { CardSize, FilterState, ImageItem, SortOrder } from '@shared/types';
+import type {
+  CardSize,
+  FilterState,
+  ImageItem,
+  MediaMode,
+  SortOrder,
+  VideoFilterState,
+  VideoItem,
+  VideoSortOrder,
+} from '@shared/types';
+import {
+  formatByteSize,
+  getActiveVideoVariant,
+  matchesMinResolutionTier,
+} from '@shared/video-utils';
 import { DownloadFooter } from './components/DownloadFooter';
 import { EmptyOrStatusView } from './components/EmptyOrStatusView';
 import { FilterBar } from './components/FilterBar';
 import { Header } from './components/Header';
 import { ImageGrid } from './components/ImageGrid';
 import { ImageLightboxModal } from './components/ImageLightboxModal';
+import { MediaModeTabs } from './components/MediaModeTabs';
 import { SelectionToolbar } from './components/SelectionToolbar';
+import { VideoFilterBar } from './components/VideoFilterBar';
+import { VideoGrid } from './components/VideoGrid';
+import { VideoLightboxModal } from './components/VideoLightboxModal';
 import { useActiveTabId } from './hooks/useActiveTabId';
+import { useBlobStreamBridge } from './hooks/useBlobStreamBridge';
 import { useTabSession } from './hooks/useTabSession';
 
-const DEFAULT_FILTER: FilterState = {
+const DEFAULT_IMAGE_FILTER: FilterState = {
   urlQuery: '',
   minWidth: null,
   minHeight: null,
@@ -19,13 +39,32 @@ const DEFAULT_FILTER: FilterState = {
   includeUnknownDimensions: false,
 };
 
+const DEFAULT_VIDEO_FILTER: VideoFilterState = {
+  urlQuery: '',
+  minResolution: 'all',
+  durationRange: 'all',
+  minDurationSec: null,
+  formats: [],
+  onlyReadyToDownload: false,
+  includeUnknownMetadata: false,
+};
+
 const FILTER_PREFS_KEY = 'wic_filter_preferences';
+const VIDEO_FILTER_PREFS_KEY = 'wic_video_filter_preferences';
 
 interface SavedFilterPreferences {
   minWidth: number | null;
   minHeight: number | null;
   formats: FilterState['formats'];
   includeUnknownDimensions: boolean;
+}
+
+interface SavedVideoFilterPreferences {
+  minResolution: VideoFilterState['minResolution'];
+  durationRange: VideoFilterState['durationRange'];
+  formats: VideoFilterState['formats'];
+  onlyReadyToDownload: boolean;
+  includeUnknownMetadata: boolean;
 }
 
 function loadSavedFilterPreferences(): Partial<FilterState> {
@@ -58,7 +97,49 @@ function saveFilterPreferences(filter: FilterState): void {
   } catch {}
 }
 
+function loadSavedVideoFilterPreferences(): Partial<VideoFilterState> {
+  try {
+    const raw = localStorage.getItem(VIDEO_FILTER_PREFS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        minResolution:
+          parsed.minResolution === '4k' ||
+          parsed.minResolution === '1080p' ||
+          parsed.minResolution === '720p'
+            ? parsed.minResolution
+            : 'all',
+        durationRange:
+          parsed.durationRange === 'short' ||
+          parsed.durationRange === 'medium' ||
+          parsed.durationRange === 'long'
+            ? parsed.durationRange
+            : 'all',
+        formats: Array.isArray(parsed.formats) ? parsed.formats : [],
+        onlyReadyToDownload: Boolean(parsed.onlyReadyToDownload),
+        includeUnknownMetadata: Boolean(parsed.includeUnknownMetadata),
+      };
+    }
+  } catch {}
+  return {};
+}
+
+function saveVideoFilterPreferences(filter: VideoFilterState): void {
+  try {
+    const prefs: SavedVideoFilterPreferences = {
+      minResolution: filter.minResolution,
+      durationRange: filter.durationRange,
+      formats: filter.formats,
+      onlyReadyToDownload: filter.onlyReadyToDownload,
+      includeUnknownMetadata: filter.includeUnknownMetadata,
+    };
+    localStorage.setItem(VIDEO_FILTER_PREFS_KEY, JSON.stringify(prefs));
+  } catch {}
+}
+
 export function App() {
+  useBlobStreamBridge();
+
   const { activeTabId, isPinned, togglePin } = useActiveTabId();
   const {
     snapshot,
@@ -69,16 +150,20 @@ export function App() {
     selectVariant,
     batchSelectVariants,
     reportThumbDimensions,
+    reportVideoMetadata,
+    resolveHlsManifest,
+    mergeAndSaveHlsStream,
     enqueueDownloads,
+    cancelDownload,
+    saveCapturedFrame,
     retryFailedDownloads,
   } = useTabSession(activeTabId);
 
   // Maintain long-lived connection with Background SW while Side Panel is open.
-  // When Side Panel is closed, Background SW detects disconnection and terminates observers.
   useEffect(() => {
     let port: chrome.runtime.Port | null = null;
     try {
-      port = chrome.runtime.connect({ name: 'hoihoi-sidepanel' });
+      port = chrome.runtime.connect({ name: PORT_NAMES.SIDEPANEL_LIFECYCLE });
     } catch {}
     return () => {
       try {
@@ -87,17 +172,34 @@ export function App() {
     };
   }, []);
 
-  // Automatically trigger scan when Side Panel opens on an unscanned tab
+  // Automatically trigger passive scan when Side Panel opens on an unscanned tab
   useEffect(() => {
     if (activeTabId && snapshot && snapshot.scanStatus === 'unscanned') {
       void triggerRescan();
     }
   }, [activeTabId, snapshot?.scanStatus, triggerRescan]);
 
+  // Active Mode ('image' | 'video')
+  const [mediaMode, setMediaModeState] = useState<MediaMode>(() => {
+    try {
+      const saved = localStorage.getItem('wic_media_mode');
+      if (saved === 'video' || saved === 'image') return saved;
+    } catch {}
+    return 'image';
+  });
+
+  const handleChangeMediaMode = useCallback((mode: MediaMode) => {
+    setMediaModeState(mode);
+    try {
+      localStorage.setItem('wic_media_mode', mode);
+    } catch {}
+  }, []);
+
+  // ---------------- Image Mode States ----------------
   const [filter, setFilterState] = useState<FilterState>(() => {
     const saved = loadSavedFilterPreferences();
     return {
-      urlQuery: '', // transient per inspection
+      urlQuery: '',
       minWidth: saved.minWidth ?? null,
       minHeight: saved.minHeight ?? null,
       formats: saved.formats ?? [],
@@ -111,8 +213,8 @@ export function App() {
   }, []);
 
   const handleResetFilter = useCallback(() => {
-    setFilterState(DEFAULT_FILTER);
-    saveFilterPreferences(DEFAULT_FILTER);
+    setFilterState(DEFAULT_IMAGE_FILTER);
+    saveFilterPreferences(DEFAULT_IMAGE_FILTER);
   }, []);
 
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => {
@@ -143,12 +245,7 @@ export function App() {
   const [cardSize, setCardSize] = useState<CardSize>(() => {
     try {
       const saved = localStorage.getItem('wic_card_size');
-      if (
-        saved === 'auto' ||
-        saved === 'small' ||
-        saved === 'medium' ||
-        saved === 'large'
-      ) {
+      if (saved === 'auto' || saved === 'small' || saved === 'medium' || saved === 'large') {
         return saved;
       }
     } catch {}
@@ -162,29 +259,92 @@ export function App() {
     } catch {}
   }, []);
 
+  // ---------------- Video Mode States ----------------
+  const [videoFilter, setVideoFilterState] = useState<VideoFilterState>(() => {
+    const saved = loadSavedVideoFilterPreferences();
+    return {
+      urlQuery: '',
+      minResolution: saved.minResolution ?? 'all',
+      durationRange: saved.durationRange ?? 'all',
+      minDurationSec: null,
+      formats: saved.formats ?? [],
+      onlyReadyToDownload: saved.onlyReadyToDownload ?? false,
+      includeUnknownMetadata: saved.includeUnknownMetadata ?? false,
+    };
+  });
+
+  const handleVideoFilterChange = useCallback((next: VideoFilterState) => {
+    setVideoFilterState(next);
+    saveVideoFilterPreferences(next);
+  }, []);
+
+  const handleResetVideoFilter = useCallback(() => {
+    setVideoFilterState(DEFAULT_VIDEO_FILTER);
+    saveVideoFilterPreferences(DEFAULT_VIDEO_FILTER);
+  }, []);
+
+  const [videoSortOrder, setVideoSortOrder] = useState<VideoSortOrder>(() => {
+    try {
+      const saved = localStorage.getItem('wic_video_sort_order') as VideoSortOrder | null;
+      if (saved) return saved;
+    } catch {}
+    return 'position_asc';
+  });
+
+  const handleVideoSortChange = useCallback((nextOrder: VideoSortOrder) => {
+    setVideoSortOrder(nextOrder);
+    try {
+      localStorage.setItem('wic_video_sort_order', nextOrder);
+    } catch {}
+  }, []);
+
+  const [videoCardSize, setVideoCardSize] = useState<CardSize>(() => {
+    try {
+      const saved = localStorage.getItem('wic_video_card_size');
+      if (saved === 'auto' || saved === 'small' || saved === 'medium' || saved === 'large') {
+        return saved;
+      }
+    } catch {}
+    return 'auto';
+  });
+
+  const handleVideoCardSizeChange = useCallback((size: CardSize) => {
+    setVideoCardSize(size);
+    try {
+      localStorage.setItem('wic_video_card_size', size);
+    } catch {}
+  }, []);
+
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
+  const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
 
   const rawItems = snapshot?.items || [];
-  const selectedIdsSet = useMemo(() => new Set(snapshot?.selectedIds || []), [snapshot?.selectedIds]);
+  const rawVideos = snapshot?.videos || [];
 
-  // Count items with unknown dimensions when dimension filtering is active
+  const selectedIdsSet = useMemo(
+    () => new Set(snapshot?.selectedIds || []),
+    [snapshot?.selectedIds],
+  );
+  const selectedVideoIdsSet = useMemo(
+    () => new Set(snapshot?.selectedVideoIds || []),
+    [snapshot?.selectedVideoIds],
+  );
+
+  // ---------------- Filtered & Sorted Images ----------------
   const hasDimensionFilter = (filter.minWidth ?? 0) > 0 || (filter.minHeight ?? 0) > 0;
 
   const { filteredItems, unknownDimensionsCount } = useMemo(() => {
     let unknownCount = 0;
     const query = filter.urlQuery.trim().toLowerCase();
 
-    // 1. Filter items
     const matched = rawItems.filter((item: ImageItem) => {
       const activeVariant =
         item.variants.find((v) => v.url === item.selectedUrl) || item.variants[0];
 
-      // 1. URL search filter
       if (query && !item.selectedUrl.toLowerCase().includes(query)) {
         return false;
       }
 
-      // 2. Format filter
       if (filter.formats.length > 0) {
         const fmt = activeVariant?.format || 'unknown';
         if (!filter.formats.includes(fmt)) {
@@ -192,7 +352,6 @@ export function App() {
         }
       }
 
-      // 3. Dimension filter
       if (hasDimensionFilter) {
         const w = activeVariant?.naturalWidth;
         const h = activeVariant?.naturalHeight;
@@ -211,7 +370,6 @@ export function App() {
       return true;
     });
 
-    // 2. Sort items
     const sorted = [...matched].sort((a, b) => {
       const aVariant = a.variants.find((v) => v.url === a.selectedUrl) || a.variants[0];
       const bVariant = b.variants.find((v) => v.url === b.selectedUrl) || b.variants[0];
@@ -219,10 +377,8 @@ export function App() {
       switch (sortOrder) {
         case 'position_asc':
           return a.firstSeenOrder - b.firstSeenOrder;
-
         case 'position_desc':
           return b.firstSeenOrder - a.firstSeenOrder;
-
         case 'size_desc': {
           const aPixels =
             aVariant?.naturalWidth && aVariant?.naturalHeight
@@ -232,17 +388,12 @@ export function App() {
             bVariant?.naturalWidth && bVariant?.naturalHeight
               ? bVariant.naturalWidth * bVariant.naturalHeight
               : null;
-
           if (aPixels !== null && bPixels !== null) {
             if (bPixels !== aPixels) return bPixels - aPixels;
-          } else if (aPixels !== null) {
-            return -1; // a has known dimensions, prioritize first
-          } else if (bPixels !== null) {
-            return 1; // b has known dimensions, prioritize first
-          }
+          } else if (aPixels !== null) return -1;
+          else if (bPixels !== null) return 1;
           return a.firstSeenOrder - b.firstSeenOrder;
         }
-
         case 'size_asc': {
           const aPixels =
             aVariant?.naturalWidth && aVariant?.naturalHeight
@@ -252,42 +403,30 @@ export function App() {
             bVariant?.naturalWidth && bVariant?.naturalHeight
               ? bVariant.naturalWidth * bVariant.naturalHeight
               : null;
-
           if (aPixels !== null && bPixels !== null) {
             if (aPixels !== bPixels) return aPixels - bPixels;
-          } else if (aPixels !== null) {
-            return -1; // a has known dimensions, prioritize first
-          } else if (bPixels !== null) {
-            return 1; // b has known dimensions, prioritize first
-          }
+          } else if (aPixels !== null) return -1;
+          else if (bPixels !== null) return 1;
           return a.firstSeenOrder - b.firstSeenOrder;
         }
-
         case 'filename_asc': {
           const aName = extractFilenameForSort(a.selectedUrl);
           const bName = extractFilenameForSort(b.selectedUrl);
           const cmp = aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' });
-          if (cmp !== 0) return cmp;
-          return a.firstSeenOrder - b.firstSeenOrder;
+          return cmp !== 0 ? cmp : a.firstSeenOrder - b.firstSeenOrder;
         }
-
         case 'filename_desc': {
           const aName = extractFilenameForSort(a.selectedUrl);
           const bName = extractFilenameForSort(b.selectedUrl);
           const cmp = bName.localeCompare(aName, undefined, { numeric: true, sensitivity: 'base' });
-          if (cmp !== 0) return cmp;
-          return a.firstSeenOrder - b.firstSeenOrder;
+          return cmp !== 0 ? cmp : a.firstSeenOrder - b.firstSeenOrder;
         }
-
         case 'selected_first': {
           const aSelected = selectedIdsSet.has(a.itemId) ? 1 : 0;
           const bSelected = selectedIdsSet.has(b.itemId) ? 1 : 0;
-          if (aSelected !== bSelected) {
-            return bSelected - aSelected;
-          }
+          if (aSelected !== bSelected) return bSelected - aSelected;
           return a.firstSeenOrder - b.firstSeenOrder;
         }
-
         default:
           return a.firstSeenOrder - b.firstSeenOrder;
       }
@@ -296,35 +435,224 @@ export function App() {
     return { filteredItems: sorted, unknownDimensionsCount: unknownCount };
   }, [rawItems, filter, hasDimensionFilter, sortOrder, selectedIdsSet]);
 
-  // Calculate selected items that are currently hidden by filters (MVP-09, AT-12)
+  // ---------------- Filtered & Sorted Videos ----------------
+  const { filteredVideos, unknownVideoMetadataCount } = useMemo(() => {
+    let unknownCount = 0;
+    const query = videoFilter.urlQuery.trim().toLowerCase();
+
+    const matched = rawVideos.filter((video: VideoItem) => {
+      const activeVar = getActiveVideoVariant(video.variants, video.selectedUrl);
+
+      if (query) {
+        const hayUrl = video.selectedUrl.toLowerCase();
+        const hayName = extractFilenameForSort(video.selectedUrl).toLowerCase();
+        if (!hayUrl.includes(query) && !hayName.includes(query)) {
+          return false;
+        }
+      }
+
+      if (videoFilter.onlyReadyToDownload && activeVar?.readiness !== 'ready') {
+        return false;
+      }
+
+      if (videoFilter.formats.length > 0) {
+        const fmt = activeVar?.format || 'unknown';
+        if (!videoFilter.formats.includes(fmt)) {
+          return false;
+        }
+      }
+
+      let hadUnknownMeta = false;
+
+      if (videoFilter.minResolution !== 'all') {
+        const resCheck = matchesMinResolutionTier(
+          activeVar?.videoWidth,
+          activeVar?.videoHeight,
+          videoFilter.minResolution,
+        );
+        if (resCheck === 'unknown') {
+          hadUnknownMeta = true;
+        } else if (!resCheck) {
+          return false;
+        }
+      }
+
+      if (videoFilter.durationRange !== 'all') {
+        const dur = video.durationSec;
+        if (dur === null || dur === undefined || !Number.isFinite(dur)) {
+          hadUnknownMeta = true;
+        } else {
+          if (videoFilter.durationRange === 'short' && dur >= 60) return false;
+          if (videoFilter.durationRange === 'medium' && (dur < 60 || dur > 600)) return false;
+          if (videoFilter.durationRange === 'long' && dur <= 600) return false;
+        }
+      }
+
+      if (hadUnknownMeta) {
+        unknownCount++;
+        if (!videoFilter.includeUnknownMetadata) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    const sorted = [...matched].sort((a, b) => {
+      const aVar = getActiveVideoVariant(a.variants, a.selectedUrl);
+      const bVar = getActiveVideoVariant(b.variants, b.selectedUrl);
+
+      switch (videoSortOrder) {
+        case 'position_asc':
+          return a.firstSeenOrder - b.firstSeenOrder;
+        case 'position_desc':
+          return b.firstSeenOrder - a.firstSeenOrder;
+        case 'resolution_desc':
+        case 'resolution_asc': {
+          const aArea = aVar?.videoWidth && aVar?.videoHeight ? aVar.videoWidth * aVar.videoHeight : null;
+          const bArea = bVar?.videoWidth && bVar?.videoHeight ? bVar.videoWidth * bVar.videoHeight : null;
+          if (aArea !== null && bArea !== null && aArea !== bArea) {
+            return videoSortOrder === 'resolution_desc' ? bArea - aArea : aArea - bArea;
+          }
+          if (aArea !== null && bArea === null) return -1;
+          if (aArea === null && bArea !== null) return 1;
+          return a.firstSeenOrder - b.firstSeenOrder;
+        }
+        case 'duration_desc':
+        case 'duration_asc': {
+          const aDur = a.durationSec;
+          const bDur = b.durationSec;
+          if (aDur !== null && bDur !== null && aDur !== bDur) {
+            return videoSortOrder === 'duration_desc' ? bDur - aDur : aDur - bDur;
+          }
+          if (aDur !== null && bDur === null) return -1;
+          if (aDur === null && bDur !== null) return 1;
+          return a.firstSeenOrder - b.firstSeenOrder;
+        }
+        case 'filesize_desc': {
+          const aSize = aVar?.fileSizeBytes ?? null;
+          const bSize = bVar?.fileSizeBytes ?? null;
+          if (aSize !== null && bSize !== null && aSize !== bSize) {
+            return bSize - aSize;
+          }
+          if (aSize !== null && bSize === null) return -1;
+          if (aSize === null && bSize !== null) return 1;
+          return a.firstSeenOrder - b.firstSeenOrder;
+        }
+        case 'filename_asc': {
+          const aName = extractFilenameForSort(a.selectedUrl);
+          const bName = extractFilenameForSort(b.selectedUrl);
+          const cmp = aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' });
+          return cmp !== 0 ? cmp : a.firstSeenOrder - b.firstSeenOrder;
+        }
+        case 'selected_first': {
+          const aSel = selectedVideoIdsSet.has(a.itemId) ? 1 : 0;
+          const bSel = selectedVideoIdsSet.has(b.itemId) ? 1 : 0;
+          if (aSel !== bSel) return bSel - aSel;
+          return a.firstSeenOrder - b.firstSeenOrder;
+        }
+        default:
+          return a.firstSeenOrder - b.firstSeenOrder;
+      }
+    });
+
+    return { filteredVideos: sorted, unknownVideoMetadataCount: unknownCount };
+  }, [rawVideos, videoFilter, videoSortOrder, selectedVideoIdsSet]);
+
+  // ---------------- Derived Selection & Preview Computations ----------------
   const visibleItemIds = useMemo(() => filteredItems.map((i) => i.itemId), [filteredItems]);
   const visibleItemIdsSet = useMemo(() => new Set(visibleItemIds), [visibleItemIds]);
+
+  const visibleVideoIds = useMemo(() => filteredVideos.map((v) => v.itemId), [filteredVideos]);
+  const visibleVideoIdsSet = useMemo(() => new Set(visibleVideoIds), [visibleVideoIds]);
+
+  // Only videos passing Readiness Gate ('ready') are eligible for "表示中を全選択"
+  const selectableVisibleVideoIds = useMemo(
+    () =>
+      filteredVideos
+        .filter((v) => getActiveVideoVariant(v.variants, v.selectedUrl)?.readiness === 'ready')
+        .map((v) => v.itemId),
+    [filteredVideos],
+  );
+
+  const hiddenSelectedImageCount = useMemo(() => {
+    let count = 0;
+    for (const id of selectedIdsSet) {
+      if (!visibleItemIdsSet.has(id)) count++;
+    }
+    return count;
+  }, [selectedIdsSet, visibleItemIdsSet]);
+
+  const hiddenSelectedVideoCount = useMemo(() => {
+    let count = 0;
+    for (const id of selectedVideoIdsSet) {
+      if (!visibleVideoIdsSet.has(id)) count++;
+    }
+    return count;
+  }, [selectedVideoIdsSet, visibleVideoIdsSet]);
 
   const previewItemIndex = useMemo(() => {
     if (!previewItemId) return -1;
     return filteredItems.findIndex((item) => item.itemId === previewItemId);
   }, [previewItemId, filteredItems]);
-
   const previewItem = previewItemIndex >= 0 ? filteredItems[previewItemIndex] : null;
 
-  const hiddenSelectedCount = useMemo(() => {
-    let count = 0;
-    for (const id of selectedIdsSet) {
-      if (!visibleItemIdsSet.has(id)) {
-        count++;
+  const previewVideoIndex = useMemo(() => {
+    if (!previewVideoId) return -1;
+    return filteredVideos.findIndex((v) => v.itemId === previewVideoId);
+  }, [previewVideoId, filteredVideos]);
+  const previewVideo = previewVideoIndex >= 0 ? filteredVideos[previewVideoIndex] : null;
+
+  const hasImageVariants = useMemo(() => rawItems.some((i) => i.variants.length > 1), [rawItems]);
+  const hasVideoVariants = useMemo(() => rawVideos.some((v) => v.variants.length > 1), [rawVideos]);
+
+  const handleBatchVideoDownload = useCallback(() => {
+    const ids = Array.from(selectedVideoIdsSet);
+    if (ids.length === 0) return;
+
+    // Safety confirmation for heavy multi-video batch downloads (5+ videos or >=300MB known size)
+    let knownTotalBytes = 0;
+    for (const v of rawVideos) {
+      if (selectedVideoIdsSet.has(v.itemId)) {
+        const av = getActiveVideoVariant(v.variants, v.selectedUrl);
+        if (av?.fileSizeBytes) knownTotalBytes += av.fileSizeBytes;
       }
     }
-    return count;
-  }, [selectedIdsSet, visibleItemIdsSet]);
 
-  const hasVariants = useMemo(() => rawItems.some((i) => i.variants.length > 1), [rawItems]);
+    if (ids.length >= 5 || knownTotalBytes >= 300 * 1024 * 1024) {
+      const sizeNotice = knownTotalBytes > 0 ? `（判明分合計: 約 ${formatByteSize(knownTotalBytes)}）` : '';
+      const confirmed = window.confirm(
+        `選択中の動画 ${ids.length} 件${sizeNotice}を一括ダウンロードしますか？`,
+      );
+      if (!confirmed) return;
+    }
+
+    void enqueueDownloads(ids);
+  }, [selectedVideoIdsSet, rawVideos, enqueueDownloads]);
+
+  const handleCancelActiveDownloads = useCallback(
+    (itemIds: string[]) => {
+      for (const id of itemIds) {
+        void cancelDownload(id);
+      }
+    },
+    [cancelDownload],
+  );
 
   const scanStatus = snapshot?.scanStatus || 'unscanned';
-  const showEmptyView =
-    scanStatus === 'unscanned' ||
-    scanStatus === 'restricted' ||
+  const isGlobalBlockedStatus = scanStatus === 'unscanned' || scanStatus === 'restricted';
+
+  const showImageEmptyView =
+    isGlobalBlockedStatus ||
     (filteredItems.length === 0 && rawItems.length === 0) ||
     filteredItems.length === 0;
+
+  const showVideoEmptyView =
+    isGlobalBlockedStatus ||
+    (filteredVideos.length === 0 && rawVideos.length === 0) ||
+    filteredVideos.length === 0;
+
+  const activeHeaderCount = mediaMode === 'video' ? rawVideos.length : rawItems.length;
 
   return (
     <div
@@ -346,7 +674,7 @@ export function App() {
       <Header
         domain={snapshot?.domain}
         pageTitle={snapshot?.pageTitle}
-        itemCount={rawItems.length}
+        itemCount={activeHeaderCount}
         scanStatus={scanStatus}
         statusMessage={snapshot?.statusMessage}
         onRescan={triggerRescan}
@@ -354,60 +682,142 @@ export function App() {
         onTogglePin={togglePin}
       />
 
-      {scanStatus !== 'unscanned' && scanStatus !== 'restricted' && (
-        <>
-          <FilterBar
-            filter={filter}
-            onChange={handleFilterChange}
-            sortOrder={sortOrder}
-            onSortChange={handleSortChange}
-            onReset={handleResetFilter}
-            unknownDimensionsCount={unknownDimensionsCount}
-          />
-
-          <SelectionToolbar
-            selectedCount={selectedIdsSet.size}
-            hiddenSelectedCount={hiddenSelectedCount}
-            visibleCount={filteredItems.length}
-            hasVariants={hasVariants}
-            cardSize={cardSize}
-            onCardSizeChange={handleCardSizeChange}
-            onSelectVisible={() => selectAllVisible(visibleItemIds)}
-            onClearAll={clearAllSelection}
-            onDownloadSelected={() => enqueueDownloads(Array.from(selectedIdsSet))}
-            onApplyVariantPreference={(target) => batchSelectVariants(target, visibleItemIds)}
-          />
-        </>
+      {!isGlobalBlockedStatus && (
+        <MediaModeTabs
+          activeMode={mediaMode}
+          onChangeMode={handleChangeMediaMode}
+          imageCount={rawItems.length}
+          videoCount={rawVideos.length}
+          selectedImageCount={selectedIdsSet.size}
+          selectedVideoCount={selectedVideoIdsSet.size}
+        />
       )}
 
-      {showEmptyView ? (
-        <EmptyOrStatusView
-          scanStatus={scanStatus}
-          statusMessage={snapshot?.statusMessage}
-          isFilterEmpty={rawItems.length > 0 && filteredItems.length === 0}
-          onClearFilter={handleResetFilter}
-          onRescan={triggerRescan}
-        />
+      {mediaMode === 'image' ? (
+        <>
+          {!isGlobalBlockedStatus && (
+            <>
+              <FilterBar
+                filter={filter}
+                onChange={handleFilterChange}
+                sortOrder={sortOrder}
+                onSortChange={handleSortChange}
+                onReset={handleResetFilter}
+                unknownDimensionsCount={unknownDimensionsCount}
+              />
+
+              <SelectionToolbar
+                mediaMode="image"
+                selectedCount={selectedIdsSet.size}
+                hiddenSelectedCount={hiddenSelectedImageCount}
+                visibleCount={filteredItems.length}
+                hasVariants={hasImageVariants}
+                cardSize={cardSize}
+                onCardSizeChange={handleCardSizeChange}
+                onSelectVisible={() => void selectAllVisible(visibleItemIds, 'image')}
+                onClearAll={() => void clearAllSelection('image')}
+                onDownloadSelected={() => void enqueueDownloads(Array.from(selectedIdsSet))}
+                onApplyVariantPreference={(target) =>
+                  void batchSelectVariants(target, visibleItemIds, 'image')
+                }
+              />
+            </>
+          )}
+
+          {showImageEmptyView ? (
+            <EmptyOrStatusView
+              mediaMode="image"
+              scanStatus={scanStatus}
+              statusMessage={snapshot?.statusMessage}
+              isFilterEmpty={rawItems.length > 0 && filteredItems.length === 0}
+              onClearFilter={handleResetFilter}
+              onRescan={triggerRescan}
+            />
+          ) : (
+            <ImageGrid
+              items={filteredItems}
+              selectedIds={selectedIdsSet}
+              downloads={snapshot?.downloads || {}}
+              cardSize={cardSize}
+              onToggleSelect={(id) => void toggleSelection(id, 'image')}
+              onSelectVariant={selectVariant}
+              onReportDimensions={reportThumbDimensions}
+              onDownloadItem={(itemId) => void enqueueDownloads([itemId])}
+              onOpenPreview={(item) => setPreviewItemId(item.itemId)}
+            />
+          )}
+        </>
       ) : (
-        <ImageGrid
-          items={filteredItems}
-          selectedIds={selectedIdsSet}
-          downloads={snapshot?.downloads || {}}
-          cardSize={cardSize}
-          onToggleSelect={toggleSelection}
-          onSelectVariant={selectVariant}
-          onReportDimensions={reportThumbDimensions}
-          onDownloadItem={(itemId) => enqueueDownloads([itemId])}
-          onOpenPreview={(item) => setPreviewItemId(item.itemId)}
-        />
+        <>
+          {!isGlobalBlockedStatus && (
+            <>
+              <VideoFilterBar
+                filter={videoFilter}
+                onChange={handleVideoFilterChange}
+                sortOrder={videoSortOrder}
+                onSortChange={handleVideoSortChange}
+                onReset={handleResetVideoFilter}
+                unknownMetadataCount={unknownVideoMetadataCount}
+              />
+
+              <SelectionToolbar
+                mediaMode="video"
+                selectedCount={selectedVideoIdsSet.size}
+                hiddenSelectedCount={hiddenSelectedVideoCount}
+                visibleCount={filteredVideos.length}
+                selectableVisibleCount={selectableVisibleVideoIds.length}
+                hasVariants={hasVideoVariants}
+                cardSize={videoCardSize}
+                onCardSizeChange={handleVideoCardSizeChange}
+                onSelectVisible={() =>
+                  void selectAllVisible(selectableVisibleVideoIds, 'video')
+                }
+                onClearAll={() => void clearAllSelection('video')}
+                onDownloadSelected={handleBatchVideoDownload}
+                onApplyVariantPreference={(target) =>
+                  void batchSelectVariants(target, visibleVideoIds, 'video')
+                }
+              />
+            </>
+          )}
+
+          {showVideoEmptyView ? (
+            <EmptyOrStatusView
+              mediaMode="video"
+              scanStatus={scanStatus}
+              statusMessage={snapshot?.statusMessage}
+              isFilterEmpty={rawVideos.length > 0 && filteredVideos.length === 0}
+              onClearFilter={handleResetVideoFilter}
+              onRescan={triggerRescan}
+            />
+          ) : (
+            <VideoGrid
+              videos={filteredVideos}
+              selectedVideoIds={selectedVideoIdsSet}
+              downloads={snapshot?.downloads || {}}
+              cardSize={videoCardSize}
+              onToggleSelect={(id) => void toggleSelection(id, 'video')}
+              onSelectVariant={selectVariant}
+              onReportVideoMetadata={reportVideoMetadata}
+              onResolveHlsManifest={async (itemId, manifestUrl) => {
+                await resolveHlsManifest(itemId, manifestUrl);
+              }}
+              onMergeHlsStream={mergeAndSaveHlsStream}
+              onDownloadVideo={(itemId) => void enqueueDownloads([itemId])}
+              onCancelDownload={(itemId) => void cancelDownload(itemId)}
+              onOpenPreview={(video) => setPreviewVideoId(video.itemId)}
+            />
+          )}
+        </>
       )}
 
       <DownloadFooter
         downloads={snapshot?.downloads || {}}
-        onRetryFailed={retryFailedDownloads}
+        onRetryFailed={() => void retryFailedDownloads(undefined, mediaMode)}
+        onCancelActive={handleCancelActiveDownloads}
       />
 
-      {previewItem && (
+      {mediaMode === 'image' && previewItem && (
         <ImageLightboxModal
           items={filteredItems}
           currentIndex={previewItemIndex}
@@ -418,9 +828,29 @@ export function App() {
             const next = filteredItems[index];
             if (next) setPreviewItemId(next.itemId);
           }}
-          onToggleSelect={toggleSelection}
-          onDownload={(itemId) => enqueueDownloads([itemId])}
+          onToggleSelect={(id) => void toggleSelection(id, 'image')}
+          onDownload={(itemId) => void enqueueDownloads([itemId])}
           onSelectVariant={selectVariant}
+        />
+      )}
+
+      {mediaMode === 'video' && previewVideo && (
+        <VideoLightboxModal
+          videos={filteredVideos}
+          currentIndex={previewVideoIndex}
+          isSelected={selectedVideoIdsSet.has(previewVideo.itemId)}
+          downloadState={snapshot?.downloads[previewVideo.itemId]}
+          onClose={() => setPreviewVideoId(null)}
+          onNavigate={(index) => {
+            const next = filteredVideos[index];
+            if (next) setPreviewVideoId(next.itemId);
+          }}
+          onToggleSelect={(id) => void toggleSelection(id, 'video')}
+          onDownload={(itemId) => void enqueueDownloads([itemId])}
+          onCancelDownload={(itemId) => void cancelDownload(itemId)}
+          onSelectVariant={selectVariant}
+          onReportVideoMetadata={reportVideoMetadata}
+          onSaveCapturedFrame={saveCapturedFrame}
         />
       )}
     </div>

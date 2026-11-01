@@ -6,11 +6,17 @@
 /** Path of the compiled IIFE content script inside `dist/`, used by `chrome.scripting.executeScript`. */
 export const CONTENT_SCANNER_SCRIPT_PATH = 'content/scanner.js';
 
-/** Default concurrent Chrome Downloads API invocations (`spec.md` §7.2). */
+/** Default concurrent Chrome Downloads API invocations for images (`spec.md` §7.2). */
 export const MAX_CONCURRENT_DOWNLOADS = 3;
+
+/** Concurrent download slots dedicated to the video lane (`video_mode_design.md` §5.1). */
+export const MAX_CONCURRENT_VIDEO_DOWNLOADS = 2;
 
 /** Hard cap on unique deduplicated `ImageItem` records retained per tab (`spec.md` §2 load control). */
 export const MAX_ITEMS_PER_TAB = 2_000;
+
+/** Hard cap on unique deduplicated `VideoItem` records retained per tab. */
+export const MAX_VIDEOS_PER_TAB = 500;
 
 /** Maximum synchronous time slice (ms) per DOM walk chunk before yielding main thread (`spec.md` §6.5, §9). */
 export const SCAN_CHUNK_BUDGET_MS = 8;
@@ -34,8 +40,17 @@ export const SESSION_PERSIST_DEBOUNCE_MS = 100;
  */
 export const INLINE_DATA_URL_SESSION_MAX_CHARS = 32_768;
 
-/** Maximum byte size allowed when reading a page-origin `blob:` URL on-demand for download. */
+/** Maximum byte size allowed when reading a page-origin image `blob:` URL inline as Data URL. */
 export const BLOB_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
+
+/** Threshold up to which a video `blob:` URL is returned inline as Data URL; larger blobs stream via Port Chunk Bridge. */
+export const INLINE_VIDEO_BLOB_MAX_BYTES = 16 * 1024 * 1024;
+
+/** Maximum byte size allowed when streaming a page-origin video `blob:` URL on-demand (1 GB). */
+export const VIDEO_BLOB_MAX_BYTES = 1024 * 1024 * 1024;
+
+/** Chunk byte size (4 MB) when streaming large blobs over extension Port (stays well below 64 MB IPC cap). */
+export const BLOB_STREAM_CHUNK_BYTES = 4 * 1024 * 1024;
 
 /** Maximum sanitized filename stem length (excluding dot + extension) (`spec.md` §7.1). */
 export const MAX_FILENAME_STEM_LENGTH = 100;
@@ -94,12 +109,26 @@ export const LAZY_SRCSET_ATTR_ALLOWLIST = [
 ] as const;
 
 /**
+ * Explicit allowlist of lazy-loading video source attributes (`video_mode_design.md` §3.1).
+ */
+export const LAZY_VIDEO_SRC_ATTR_ALLOWLIST = [
+  'data-video-src',
+  'data-video',
+  'data-video-url',
+  'data-mp4',
+  'data-webm',
+  'data-stream',
+  'data-hls',
+] as const;
+
+/**
  * Attribute filter passed to `MutationObserver.observe` so hover animations (`class` toggles)
  * do not flood the main thread (`design.md` §6).
  */
 export const OBSERVED_MUTATION_ATTRIBUTES: readonly string[] = [
   'src',
   'srcset',
+  'poster',
   'href',
   'xlink:href',
   'style',
@@ -110,6 +139,7 @@ export const OBSERVED_MUTATION_ATTRIBUTES: readonly string[] = [
   'rel',
   ...LAZY_SRC_ATTR_ALLOWLIST,
   ...LAZY_SRCSET_ATTR_ALLOWLIST,
+  ...LAZY_VIDEO_SRC_ATTR_ALLOWLIST,
 ];
 
 /**
@@ -129,6 +159,40 @@ export const LIKELY_IMAGE_PATH_EXTENSIONS = new Set([
   '.tif',
   '.tiff',
 ]);
+
+/**
+ * File extensions recognized as video files or streaming manifests (`video_mode_design.md` §3, §4).
+ */
+export const LIKELY_VIDEO_PATH_EXTENSIONS = new Set([
+  '.mp4',
+  '.webm',
+  '.mov',
+  '.m4v',
+  '.ogv',
+  '.ogg',
+  '.mkv',
+  '.avi',
+  '.m3u8',
+  '.mpd',
+]);
+
+/**
+ * Hostnames where video downloading is disabled to strictly comply with Chrome Web Store policies.
+ */
+export const RESTRICTED_VIDEO_DOMAINS = new Set([
+  'youtube.com',
+  'www.youtube.com',
+  'm.youtube.com',
+  'youtu.be',
+  'music.youtube.com',
+  'www.youtube-nocookie.com',
+]);
+
+/** Port channel names used for long-lived connections and large blob streaming. */
+export const PORT_NAMES = {
+  SIDEPANEL_LIFECYCLE: 'hoihoi-sidepanel',
+  BLOB_STREAM: 'hoihoi-blob-stream',
+} as const;
 
 /** Storage key namespaces inside `chrome.storage.session` (`design.md` §7.2). */
 export const STORAGE_KEYS = {

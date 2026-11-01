@@ -1,5 +1,6 @@
 import {
   MAX_ITEMS_PER_TAB,
+  MAX_VIDEOS_PER_TAB,
   SESSION_PERSIST_DEBOUNCE_MS,
   STORAGE_KEYS,
 } from '@shared/constants';
@@ -7,13 +8,23 @@ import type { BackgroundToPanelEvent, SelectionMutation } from '@shared/messages
 import type {
   ImageFormat,
   ImageItem,
-  ImageVariant,
   ItemDownloadState,
+  MediaMode,
   RawCandidateGroup,
+  RawVideoCandidateGroup,
   ScanStatus,
   TabSessionSnapshot,
+  VideoItem,
+  VideoVariant,
 } from '@shared/types';
 import { inferImageFormat, pickBestVariantUrl } from '@shared/url-utils';
+import {
+  classifyVideoDeliveryAndReadiness,
+  getActiveVideoVariant,
+  inferVideoFormat,
+  parseHlsMasterPlaylist,
+  pickBestVideoVariantUrl,
+} from '@shared/video-utils';
 
 export interface InternalTabSession {
   tabId: number;
@@ -29,8 +40,14 @@ export interface InternalTabSession {
   itemByPrimaryUrl: Map<string, ImageItem>;
   itemByVariantUrl: Map<string, ImageItem>;
   itemById: Map<string, ImageItem>;
+  videoCounter: number;
+  videos: VideoItem[];
+  videoByPrimaryUrl: Map<string, VideoItem>;
+  videoByVariantUrl: Map<string, VideoItem>;
+  videoById: Map<string, VideoItem>;
   seenOccurrenceKeys: Set<string>;
   selectedIds: Set<string>;
+  selectedVideoIds: Set<string>;
   downloads: Map<string, ItemDownloadState>;
   dirty: boolean;
 }
@@ -91,7 +108,7 @@ export class SessionStore {
     const itemById = new Map<string, ImageItem>();
     let maxCounter = 0;
 
-    for (const item of snap.items) {
+    for (const item of snap.items || []) {
       itemByPrimaryUrl.set(item.primaryUrl, item);
       itemById.set(item.itemId, item);
       itemByVariantUrl.set(item.primaryUrl, item);
@@ -101,6 +118,25 @@ export class SessionStore {
       const match = /^item_(\d+)$/.exec(item.itemId);
       if (match?.[1]) {
         maxCounter = Math.max(maxCounter, Number(match[1]));
+      }
+    }
+
+    const videoByPrimaryUrl = new Map<string, VideoItem>();
+    const videoByVariantUrl = new Map<string, VideoItem>();
+    const videoById = new Map<string, VideoItem>();
+    let maxVideoCounter = 0;
+    const restoredVideos = snap.videos || [];
+
+    for (const video of restoredVideos) {
+      videoByPrimaryUrl.set(video.primaryUrl, video);
+      videoById.set(video.itemId, video);
+      videoByVariantUrl.set(video.primaryUrl, video);
+      for (const v of video.variants) {
+        videoByVariantUrl.set(v.url, video);
+      }
+      const match = /^vid_(\d+)$/.exec(video.itemId);
+      if (match?.[1]) {
+        maxVideoCounter = Math.max(maxVideoCounter, Number(match[1]));
       }
     }
 
@@ -121,12 +157,18 @@ export class SessionStore {
       scanStatus: snap.scanStatus,
       statusMessage: snap.statusMessage,
       itemCounter: maxCounter,
-      items: snap.items,
+      items: snap.items || [],
       itemByPrimaryUrl,
       itemByVariantUrl,
       itemById,
+      videoCounter: maxVideoCounter,
+      videos: restoredVideos,
+      videoByPrimaryUrl,
+      videoByVariantUrl,
+      videoById,
       seenOccurrenceKeys: new Set(),
       selectedIds: new Set(snap.selectedIds || []),
+      selectedVideoIds: new Set(snap.selectedVideoIds || []),
       downloads,
       dirty: false,
     });
@@ -155,8 +197,14 @@ export class SessionStore {
         itemByPrimaryUrl: new Map(),
         itemByVariantUrl: new Map(),
         itemById: new Map(),
+        videoCounter: 0,
+        videos: [],
+        videoByPrimaryUrl: new Map(),
+        videoByVariantUrl: new Map(),
+        videoById: new Map(),
         seenOccurrenceKeys: new Set(),
         selectedIds: new Set(),
+        selectedVideoIds: new Set(),
         downloads: new Map(),
         dirty: true,
       };
@@ -194,7 +242,9 @@ export class SessionStore {
       scanStatus: session.scanStatus,
       statusMessage: session.statusMessage,
       items: [...session.items],
+      videos: [...session.videos],
       selectedIds: Array.from(session.selectedIds),
+      selectedVideoIds: Array.from(session.selectedVideoIds),
       downloads,
     };
   }
@@ -252,8 +302,13 @@ export class SessionStore {
     session.itemByPrimaryUrl.clear();
     session.itemByVariantUrl.clear();
     session.itemById.clear();
+    session.videos = [];
+    session.videoByPrimaryUrl.clear();
+    session.videoByVariantUrl.clear();
+    session.videoById.clear();
     session.seenOccurrenceKeys.clear();
     session.selectedIds.clear();
+    session.selectedVideoIds.clear();
     // Keep finished downloads in downloads map so history isn't immediately purged
     session.revision += 1;
     session.dirty = true;
@@ -276,7 +331,6 @@ export class SessionStore {
     pageTitle?: string,
   ): void {
     const session = this.getOrCreateSession(tabId);
-    // Keep scanEpoch synced with the latest seen
     if (scanEpoch > session.scanEpoch) {
       session.scanEpoch = scanEpoch;
     }
@@ -305,7 +359,6 @@ export class SessionStore {
       }
 
       if (!item) {
-        // Enforce MAX_ITEMS_PER_TAB limit
         if (session.items.length >= MAX_ITEMS_PER_TAB) {
           if (session.scanStatus !== 'limit_reached') {
             this.setScanStatus(tabId, 'limit_reached', '検出件数が上限 (2,000件) に達しました');
@@ -331,13 +384,11 @@ export class SessionStore {
 
       session.itemByVariantUrl.set(group.primaryUrl, item);
 
-      // Check occurrence key deduplication
       if (!session.seenOccurrenceKeys.has(group.occurrenceKey)) {
         session.seenOccurrenceKeys.add(group.occurrenceKey);
         item.occurrenceCount += 1;
       }
 
-      // Merge variants into item
       for (const rawVar of group.variants) {
         session.itemByVariantUrl.set(rawVar.url, item);
 
@@ -374,7 +425,6 @@ export class SessionStore {
         }
       }
 
-      // Automatically select best high-resolution candidate if not manually chosen
       if (!item.manualVariantSelected) {
         item.selectedUrl = pickBestVariantUrl(item.variants);
       }
@@ -393,6 +443,178 @@ export class SessionStore {
         tabId,
         revision: session.revision,
         upsertedItems: Array.from(upsertedMap.values()),
+        scanStatus: session.scanStatus,
+      });
+    }
+  }
+
+  mergeVideoCandidateGroups(
+    tabId: number,
+    scanEpoch: number,
+    videoGroups: RawVideoCandidateGroup[],
+    pageUrl?: string,
+    pageTitle?: string,
+  ): void {
+    if (videoGroups.length === 0) return;
+
+    const session = this.getOrCreateSession(tabId, pageUrl, pageTitle);
+    if (scanEpoch > session.scanEpoch) {
+      session.scanEpoch = scanEpoch;
+    }
+    if (pageUrl && !session.pageUrl) {
+      session.pageUrl = pageUrl;
+      try {
+        session.domain = new URL(pageUrl).hostname;
+      } catch {}
+    }
+    if (pageTitle && (!session.pageTitle || session.pageTitle !== pageTitle)) {
+      session.pageTitle = pageTitle;
+      session.dirty = true;
+    }
+
+    const upsertedVideos = new Map<string, VideoItem>();
+
+    for (const group of videoGroups) {
+      let video = session.videoByPrimaryUrl.get(group.primaryUrl);
+
+      if (!video) {
+        video = session.videoByVariantUrl.get(group.primaryUrl);
+        if (!video) {
+          for (const v of group.variants) {
+            const match = session.videoByVariantUrl.get(v.url);
+            if (match) {
+              video = match;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!video) {
+        if (session.videos.length >= MAX_VIDEOS_PER_TAB) {
+          break;
+        }
+
+        const itemId = `vid_${++session.videoCounter}`;
+        video = {
+          itemId,
+          primaryUrl: group.primaryUrl,
+          selectedUrl: group.primaryUrl,
+          variants: [],
+          sources: [],
+          durationSec: group.durationSec,
+          isLive: group.isLive,
+          posterUrl: group.posterUrl,
+          occurrenceCount: 0,
+          firstSeenOrder: group.domOrder,
+        };
+
+        session.videos.push(video);
+        session.videoByPrimaryUrl.set(group.primaryUrl, video);
+        session.videoById.set(itemId, video);
+      } else {
+        // Enrich metadata passively when DOM/OGP/JSON-LD supplements an earlier network entry
+        if (group.durationSec && !video.durationSec) {
+          video.durationSec = group.durationSec;
+        }
+        if (group.isLive !== undefined && video.isLive === undefined) {
+          video.isLive = group.isLive;
+        }
+        if (group.posterUrl && (!video.posterUrl || video.posterUrl.startsWith('data:'))) {
+          video.posterUrl = group.posterUrl;
+        }
+      }
+
+      session.videoByVariantUrl.set(group.primaryUrl, video);
+
+      if (!session.seenOccurrenceKeys.has(group.occurrenceKey)) {
+        session.seenOccurrenceKeys.add(group.occurrenceKey);
+        video.occurrenceCount += 1;
+      }
+
+      for (const rawVar of group.variants) {
+        session.videoByVariantUrl.set(rawVar.url, video);
+
+        if (!video.sources.includes(rawVar.source)) {
+          video.sources.push(rawVar.source);
+        }
+
+        const format = inferVideoFormat(rawVar.url, rawVar.mimeHint);
+        const { deliveryType, readiness, blockReason } = classifyVideoDeliveryAndReadiness({
+          url: rawVar.url,
+          format,
+          pageUrl: session.pageUrl,
+          isDrmProtected: rawVar.isDrmProtected,
+          isMseStream: rawVar.isMseStream,
+        });
+
+        let existingVar = video.variants.find((v) => v.url === rawVar.url);
+        if (!existingVar) {
+          existingVar = {
+            url: rawVar.url,
+            format,
+            deliveryType,
+            readiness,
+            blockReason,
+            roles: [rawVar.role],
+            descriptors: rawVar.descriptor ? [rawVar.descriptor] : [],
+            videoWidth: rawVar.videoWidth,
+            videoHeight: rawVar.videoHeight,
+            fileSizeBytes: rawVar.fileSizeBytes ?? null,
+            largeDataRefId: rawVar.largeDataRefId,
+          };
+          video.variants.push(existingVar);
+        } else {
+          if (!existingVar.roles.includes(rawVar.role)) {
+            existingVar.roles.push(rawVar.role);
+          }
+          if (rawVar.descriptor && !existingVar.descriptors.includes(rawVar.descriptor)) {
+            existingVar.descriptors.push(rawVar.descriptor);
+          }
+          if (existingVar.format === 'unknown' && format !== 'unknown') {
+            existingVar.format = format;
+          }
+          if (rawVar.videoWidth && !existingVar.videoWidth) {
+            existingVar.videoWidth = rawVar.videoWidth;
+          }
+          if (rawVar.videoHeight && !existingVar.videoHeight) {
+            existingVar.videoHeight = rawVar.videoHeight;
+          }
+          if (rawVar.fileSizeBytes && !existingVar.fileSizeBytes) {
+            existingVar.fileSizeBytes = rawVar.fileSizeBytes;
+          }
+          if (rawVar.isDrmProtected || rawVar.isMseStream) {
+            existingVar.deliveryType = deliveryType;
+            existingVar.readiness = readiness;
+            existingVar.blockReason = blockReason;
+          }
+        }
+      }
+
+      if (!video.manualVariantSelected) {
+        video.selectedUrl = pickBestVideoVariantUrl(video.variants);
+      }
+
+      // If currently selected video became blocked (e.g. DRM detected), clean up selection
+      const activeVar = getActiveVideoVariant(video.variants, video.selectedUrl);
+      if (activeVar && activeVar.readiness !== 'ready' && session.selectedVideoIds.has(video.itemId)) {
+        session.selectedVideoIds.delete(video.itemId);
+      }
+
+      upsertedVideos.set(video.itemId, video);
+    }
+
+    if (upsertedVideos.size > 0) {
+      session.revision += 1;
+      session.dirty = true;
+      this.schedulePersist();
+
+      this.emitEvent({
+        channel: 'WIC_BG_TO_PANEL',
+        type: 'EVENT_VIDEOS_UPSERTED',
+        tabId,
+        revision: session.revision,
+        upsertedVideos: Array.from(upsertedVideos.values()),
         scanStatus: session.scanStatus,
       });
     }
@@ -439,9 +661,233 @@ export class SessionStore {
     }
   }
 
+  updateVideoMetadata(
+    tabId: number,
+    params: {
+      url: string;
+      videoWidth?: number | null;
+      videoHeight?: number | null;
+      durationSec?: number | null;
+      isLive?: boolean;
+      posterUrl?: string;
+      fileSizeBytes?: number | null;
+      isDrmProtected?: boolean;
+      isMseStream?: boolean;
+    },
+  ): void {
+    const session = this.sessions.get(tabId);
+    if (!session) return;
+
+    const modifiedVideos: VideoItem[] = [];
+    let selectionChanged = false;
+
+    for (const video of session.videos) {
+      let touched = false;
+      for (const variant of video.variants) {
+        if (variant.url === params.url) {
+          if (params.videoWidth && !variant.videoWidth) {
+            variant.videoWidth = params.videoWidth;
+            touched = true;
+          }
+          if (params.videoHeight && !variant.videoHeight) {
+            variant.videoHeight = params.videoHeight;
+            touched = true;
+          }
+          if (params.fileSizeBytes && !variant.fileSizeBytes) {
+            variant.fileSizeBytes = params.fileSizeBytes;
+            touched = true;
+          }
+          if (params.isDrmProtected || params.isMseStream) {
+            const nextClass = classifyVideoDeliveryAndReadiness({
+              url: variant.url,
+              format: variant.format,
+              pageUrl: session.pageUrl,
+              isDrmProtected: params.isDrmProtected,
+              isMseStream: params.isMseStream,
+            });
+            if (
+              variant.deliveryType !== nextClass.deliveryType ||
+              variant.readiness !== nextClass.readiness
+            ) {
+              variant.deliveryType = nextClass.deliveryType;
+              variant.readiness = nextClass.readiness;
+              variant.blockReason = nextClass.blockReason;
+              touched = true;
+            }
+          }
+        }
+      }
+
+      if (touched || video.primaryUrl === params.url || video.selectedUrl === params.url) {
+        if (params.durationSec && !video.durationSec) {
+          video.durationSec = params.durationSec;
+          touched = true;
+        }
+        if (params.isLive !== undefined && video.isLive === undefined) {
+          video.isLive = params.isLive;
+          touched = true;
+        }
+        if (params.posterUrl && !video.posterUrl) {
+          video.posterUrl = params.posterUrl;
+          touched = true;
+        }
+      }
+
+      if (touched) {
+        if (!video.manualVariantSelected) {
+          video.selectedUrl = pickBestVideoVariantUrl(video.variants);
+        }
+        const activeVar = getActiveVideoVariant(video.variants, video.selectedUrl);
+        if (activeVar && activeVar.readiness !== 'ready' && session.selectedVideoIds.has(video.itemId)) {
+          session.selectedVideoIds.delete(video.itemId);
+          selectionChanged = true;
+        }
+        modifiedVideos.push(video);
+      }
+    }
+
+    if (modifiedVideos.length > 0) {
+      session.revision += 1;
+      session.dirty = true;
+      this.schedulePersist();
+
+      this.emitEvent({
+        channel: 'WIC_BG_TO_PANEL',
+        type: 'EVENT_VIDEOS_UPSERTED',
+        tabId,
+        revision: session.revision,
+        upsertedVideos: modifiedVideos,
+        scanStatus: session.scanStatus,
+      });
+
+      if (selectionChanged) {
+        session.revision += 1;
+        this.emitEvent({
+          channel: 'WIC_BG_TO_PANEL',
+          type: 'EVENT_VIDEO_SELECTION_CHANGED',
+          tabId,
+          revision: session.revision,
+          selectedVideoIds: Array.from(session.selectedVideoIds),
+        });
+      }
+    }
+  }
+
+  /**
+   * Merges resolution variants parsed on-demand from an HLS Master `.m3u8` manifest.
+   */
+  applyParsedHlsManifest(
+    tabId: number,
+    itemId: string,
+    manifestUrl: string,
+    manifestText: string,
+  ): { addedCount: number; isDrmEncrypted: boolean } {
+    const session = this.sessions.get(tabId);
+    if (!session) return { addedCount: 0, isDrmEncrypted: false };
+
+    const video = session.videoById.get(itemId);
+    if (!video) return { addedCount: 0, isDrmEncrypted: false };
+
+    const parsed = parseHlsMasterPlaylist(manifestText, manifestUrl);
+    let addedCount = 0;
+
+    if (parsed.isDrmEncrypted) {
+      for (const v of video.variants) {
+        if (v.url === manifestUrl) {
+          v.deliveryType = 'drm_protected';
+          v.readiness = 'blocked';
+          v.blockReason = '暗号化 (DRM / SAMPLE-AES) されたストリームのため保存できません';
+        }
+      }
+    }
+
+    for (const pv of parsed.variants) {
+      session.videoByVariantUrl.set(pv.url, video);
+      let existing = video.variants.find((v) => v.url === pv.url);
+      if (!existing) {
+        const cls = classifyVideoDeliveryAndReadiness({
+          url: pv.url,
+          format: 'hls',
+          pageUrl: session.pageUrl,
+          isDrmProtected: parsed.isDrmEncrypted,
+        });
+        const newVariant: VideoVariant = {
+          url: pv.url,
+          format: 'hls',
+          deliveryType: cls.deliveryType,
+          readiness: cls.readiness,
+          blockReason: cls.blockReason,
+          roles: ['manifest-variant'],
+          descriptors: [pv.descriptor],
+          videoWidth: pv.width,
+          videoHeight: pv.height,
+          fileSizeBytes: null,
+          bitrateBps: pv.bandwidthBps,
+        };
+        video.variants.push(newVariant);
+        addedCount++;
+      }
+    }
+
+    if (addedCount > 0 || parsed.isDrmEncrypted) {
+      if (!video.manualVariantSelected && parsed.variants[0]) {
+        video.selectedUrl = parsed.variants[0].url;
+      }
+      session.revision += 1;
+      session.dirty = true;
+      this.schedulePersist();
+
+      this.emitEvent({
+        channel: 'WIC_BG_TO_PANEL',
+        type: 'EVENT_VIDEOS_UPSERTED',
+        tabId,
+        revision: session.revision,
+        upsertedVideos: [video],
+        scanStatus: session.scanStatus,
+      });
+    }
+
+    return { addedCount, isDrmEncrypted: parsed.isDrmEncrypted };
+  }
+
   selectVariant(tabId: number, itemId: string, variantUrl: string): boolean {
     const session = this.sessions.get(tabId);
     if (!session) return false;
+
+    if (itemId.startsWith('vid_')) {
+      const video = session.videoById.get(itemId);
+      if (!video) return false;
+      const variant = video.variants.find((v) => v.url === variantUrl);
+      if (!variant) return false;
+
+      video.selectedUrl = variantUrl;
+      video.manualVariantSelected = true;
+      session.revision += 1;
+      session.dirty = true;
+      this.schedulePersist();
+
+      this.emitEvent({
+        channel: 'WIC_BG_TO_PANEL',
+        type: 'EVENT_VIDEOS_UPSERTED',
+        tabId,
+        revision: session.revision,
+        upsertedVideos: [video],
+        scanStatus: session.scanStatus,
+      });
+
+      if (variant.readiness !== 'ready' && session.selectedVideoIds.has(itemId)) {
+        session.selectedVideoIds.delete(itemId);
+        session.revision += 1;
+        this.emitEvent({
+          channel: 'WIC_BG_TO_PANEL',
+          type: 'EVENT_VIDEO_SELECTION_CHANGED',
+          tabId,
+          revision: session.revision,
+          selectedVideoIds: Array.from(session.selectedVideoIds),
+        });
+      }
+      return true;
+    }
 
     const item = session.itemById.get(itemId);
     if (!item) return false;
@@ -471,11 +917,45 @@ export class SessionStore {
     tabId: number,
     target: 'high_res' | 'display',
     itemIds?: string[],
+    mediaMode: MediaMode = 'image',
   ): boolean {
     const session = this.sessions.get(tabId);
     if (!session) return false;
 
     const targetSet = itemIds ? new Set(itemIds) : null;
+
+    if (mediaMode === 'video') {
+      const modifiedVideos: VideoItem[] = [];
+      for (const video of session.videos) {
+        if (targetSet && !targetSet.has(video.itemId)) continue;
+        const newUrl =
+          target === 'high_res'
+            ? pickBestVideoVariantUrl(video.variants)
+            : video.primaryUrl;
+        if (video.selectedUrl !== newUrl) {
+          video.selectedUrl = newUrl;
+          video.manualVariantSelected = target === 'display';
+          modifiedVideos.push(video);
+        }
+      }
+
+      if (modifiedVideos.length > 0) {
+        session.revision += 1;
+        session.dirty = true;
+        this.schedulePersist();
+
+        this.emitEvent({
+          channel: 'WIC_BG_TO_PANEL',
+          type: 'EVENT_VIDEOS_UPSERTED',
+          tabId,
+          revision: session.revision,
+          upsertedVideos: modifiedVideos,
+          scanStatus: session.scanStatus,
+        });
+      }
+      return true;
+    }
+
     const modifiedItems: ImageItem[] = [];
 
     for (const item of session.items) {
@@ -511,8 +991,69 @@ export class SessionStore {
     return true;
   }
 
-  updateSelection(tabId: number, mutation: SelectionMutation): string[] {
+  updateSelection(
+    tabId: number,
+    mutation: SelectionMutation,
+    mediaMode: MediaMode = 'image',
+  ): string[] {
     const session = this.getOrCreateSession(tabId);
+
+    const isVideoMode =
+      mediaMode === 'video' ||
+      (mutation.mode === 'toggle_one' && mutation.itemId.startsWith('vid_'));
+
+    if (isVideoMode) {
+      const canSelectVideo = (id: string): boolean => {
+        const video = session.videoById.get(id);
+        if (!video) return false;
+        const activeVar = getActiveVideoVariant(video.variants, video.selectedUrl);
+        return Boolean(activeVar && activeVar.readiness === 'ready');
+      };
+
+      switch (mutation.mode) {
+        case 'toggle_one': {
+          if (session.selectedVideoIds.has(mutation.itemId)) {
+            session.selectedVideoIds.delete(mutation.itemId);
+          } else if (canSelectVideo(mutation.itemId)) {
+            session.selectedVideoIds.add(mutation.itemId);
+          }
+          break;
+        }
+        case 'add_many': {
+          for (const id of mutation.itemIds) {
+            if (canSelectVideo(id)) {
+              session.selectedVideoIds.add(id);
+            }
+          }
+          break;
+        }
+        case 'remove_many': {
+          for (const id of mutation.itemIds) {
+            session.selectedVideoIds.delete(id);
+          }
+          break;
+        }
+        case 'clear_all': {
+          session.selectedVideoIds.clear();
+          break;
+        }
+      }
+
+      session.revision += 1;
+      session.dirty = true;
+      this.schedulePersist();
+
+      const selectedVideoList = Array.from(session.selectedVideoIds);
+      this.emitEvent({
+        channel: 'WIC_BG_TO_PANEL',
+        type: 'EVENT_VIDEO_SELECTION_CHANGED',
+        tabId,
+        revision: session.revision,
+        selectedVideoIds: selectedVideoList,
+      });
+
+      return selectedVideoList;
+    }
 
     switch (mutation.mode) {
       case 'toggle_one': {
@@ -572,6 +1113,36 @@ export class SessionStore {
       tabId,
       revision: session.revision,
       updatedDownloads: [state],
+    });
+  }
+
+  /**
+   * Emits live byte progress for in-flight video downloads without bumping revision
+   * or thrashing `chrome.storage.session`.
+   */
+  emitDownloadProgress(
+    tabId: number,
+    updates: Array<{ itemId: string; bytesReceived: number; totalBytes?: number }>,
+  ): void {
+    if (updates.length === 0) return;
+    const session = this.sessions.get(tabId);
+    if (session) {
+      for (const u of updates) {
+        const existing = session.downloads.get(u.itemId);
+        if (existing && existing.status === 'in_progress') {
+          existing.bytesReceived = u.bytesReceived;
+          if (u.totalBytes && u.totalBytes > 0) {
+            existing.totalBytes = u.totalBytes;
+          }
+        }
+      }
+    }
+
+    this.emitEvent({
+      channel: 'WIC_BG_TO_PANEL',
+      type: 'EVENT_DOWNLOAD_PROGRESS',
+      tabId,
+      updates,
     });
   }
 

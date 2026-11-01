@@ -22,7 +22,8 @@ export type DetectionSource =
   | 'css-bg'
   | 'svg-image'
   | 'lazy-attr'
-  | 'link-href';
+  | 'link-href'
+  | 'video-poster';
 
 /** Role of a candidate URL inside an `ImageItem.variants` list (`spec.md` §6.3). */
 export type VariantRole =
@@ -144,6 +145,10 @@ export interface ItemDownloadState {
   status: DownloadStatus;
   downloadId?: number;
   suggestedFilename?: string;
+  /** Live received bytes while `in_progress` (ephemeral, populated for video downloads). */
+  bytesReceived?: number;
+  /** Total expected bytes if known from Content-Length or Blob size. */
+  totalBytes?: number;
   /** Raw Chrome `InterruptReason` or internal error code. */
   errorCode?: string;
   errorCategory?: DownloadErrorCategory;
@@ -152,6 +157,145 @@ export interface ItemDownloadState {
   /** Whether the manual "再試行" action is meaningful for this failure (`spec.md` MVP-16). */
   retryable: boolean;
   updatedAt: number;
+}
+
+/** Active media tab mode inside Side Panel (`video_mode_design.md` §4.2, §6.1). */
+export type MediaMode = 'image' | 'video';
+
+/** Canonical video formats & manifest types supported for display and filtering. */
+export type VideoFormat =
+  | 'mp4'
+  | 'webm'
+  | 'mov'
+  | 'm4v'
+  | 'ogg'
+  | 'mkv'
+  | 'avi'
+  | 'hls'
+  | 'dash'
+  | 'unknown';
+
+/** Delivery mechanism classification for video candidates (`video_mode_design.md` §4.1). */
+export type VideoDeliveryType =
+  | 'direct'          // Standard HTTP(S) / data: single-file video
+  | 'blob_candidate'  // Page-origin `blob:` URL (verified & streamed only on explicit download click)
+  | 'adaptive_hls'    // HLS `.m3u8` playlist
+  | 'adaptive_dash'   // MPEG-DASH `.mpd` manifest
+  | 'mse_stream'      // MediaSource virtual stream URL (cannot be saved standalone)
+  | 'drm_protected'   // EME / Widevine protected media (blocked)
+  | 'restricted_host';// Policy-restricted hostname such as YouTube (blocked)
+
+/** Precondition gate state controlling whether a video variant can be selected and downloaded. */
+export type DownloadReadiness = 'ready' | 'stream_manifest' | 'blocked';
+
+/** Origin mechanism from which a video candidate was passively discovered. */
+export type VideoDetectionSource =
+  | 'video-element'
+  | 'video-source'
+  | 'shadow-video'
+  | 'link-href'
+  | 'lazy-video-attr'
+  | 'meta-ogp'
+  | 'json-ld'
+  | 'network-resource';
+
+/** Role of a candidate URL inside a `VideoItem.variants` list. */
+export type VideoVariantRole =
+  | 'current-src'
+  | 'src'
+  | 'source-tag'
+  | 'link-target'
+  | 'lazy-attr'
+  | 'manifest-variant'
+  | 'metadata'
+  | 'network';
+
+/** Raw video candidate entry passively extracted by Content Script (zero network fetches). */
+export interface RawVideoVariantCandidate {
+  url: string;
+  role: VideoVariantRole;
+  source: VideoDetectionSource;
+  descriptor?: string;
+  mimeHint?: string;
+  videoWidth: number | null;
+  videoHeight: number | null;
+  fileSizeBytes?: number | null;
+  isDrmProtected?: boolean;
+  isMseStream?: boolean;
+  largeDataRefId?: string;
+}
+
+/** Logical video candidate group passively emitted by Content Script. */
+export interface RawVideoCandidateGroup {
+  occurrenceKey: string;
+  primaryUrl: string;
+  domOrder: number;
+  durationSec: number | null;
+  isLive?: boolean;
+  posterUrl?: string;
+  variants: RawVideoVariantCandidate[];
+}
+
+/** Deduplicated URL variant attached to a `VideoItem`. */
+export interface VideoVariant {
+  url: string;
+  format: VideoFormat;
+  deliveryType: VideoDeliveryType;
+  readiness: DownloadReadiness;
+  blockReason?: string;
+  roles: VideoVariantRole[];
+  descriptors: string[];
+  videoWidth: number | null;
+  videoHeight: number | null;
+  fileSizeBytes: number | null;
+  bitrateBps?: number | null;
+  largeDataRefId?: string;
+}
+
+/** Canonical video card entity managed per tab (`itemId` uses `"vid_*"` namespace). */
+export interface VideoItem {
+  itemId: string;
+  primaryUrl: string;
+  selectedUrl: string;
+  variants: VideoVariant[];
+  sources: VideoDetectionSource[];
+  durationSec: number | null;
+  isLive?: boolean;
+  posterUrl?: string;
+  occurrenceCount: number;
+  firstSeenOrder: number;
+  manualVariantSelected?: boolean;
+}
+
+/** Resolution preset tiers for video filtering (orientation-agnostic via short/long side). */
+export type VideoResolutionTier = 'all' | '4k' | '1080p' | '720p' | 'sd';
+
+/** Duration preset ranges for video filtering. */
+export type VideoDurationRange = 'all' | 'short' | 'medium' | 'long';
+
+/** Sort criteria for displayed videos in Side Panel. */
+export type VideoSortOrder =
+  | 'position_asc'
+  | 'position_desc'
+  | 'resolution_desc'
+  | 'resolution_asc'
+  | 'duration_desc'
+  | 'duration_asc'
+  | 'filesize_desc'
+  | 'filename_asc'
+  | 'selected_first';
+
+/** Side Panel filter criteria dedicated to Video Mode (`video_mode_design.md` §6.2). */
+export interface VideoFilterState {
+  urlQuery: string;
+  minResolution: VideoResolutionTier;
+  durationRange: VideoDurationRange;
+  minDurationSec: number | null;
+  formats: VideoFormat[];
+  /** When true, hides `stream_manifest` and `blocked` items so only 1-click `ready` videos appear. */
+  onlyReadyToDownload: boolean;
+  /** Controls whether videos with unprobed (`null`) dimensions/duration remain visible when filtering. */
+  includeUnknownMetadata: boolean;
 }
 
 /** Sort criteria for displayed images in Side Panel. */
@@ -213,9 +357,13 @@ export interface TabSessionSnapshot {
   statusMessage?: string;
   /** Ordered list of deduplicated image items (`firstSeenOrder` ascending). */
   items: ImageItem[];
-  /** Selected `itemId`s. Preserved even when items are hidden by filters (`spec.md` §4.3, MVP-09, AT-12). */
+  /** Ordered list of deduplicated video items (`firstSeenOrder` ascending). */
+  videos: VideoItem[];
+  /** Selected image `itemId`s. Preserved even when items are hidden by filters (`spec.md` §4.3, MVP-09, AT-12). */
   selectedIds: string[];
-  /** Per-item download state keyed by `itemId`. */
+  /** Selected video `itemId`s (`"vid_*"`), isolated from image selections. */
+  selectedVideoIds: string[];
+  /** Per-item download state keyed by `itemId` (shared across `"item_*"` and `"vid_*"`). */
   downloads: Record<string, ItemDownloadState>;
 }
 
@@ -226,4 +374,6 @@ export interface ActiveDownloadIndexEntry {
   itemId: string;
   targetUrl: string;
   startedAt: number;
+  /** Optional object URL in Side Panel / extension scope to revoke once download finishes. */
+  revokeObjectUrl?: string;
 }

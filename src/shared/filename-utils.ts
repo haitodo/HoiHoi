@@ -1,6 +1,7 @@
 import { MAX_FILENAME_STEM_LENGTH, MAX_FOLDER_NAME_LENGTH } from './constants';
-import type { ImageFormat } from './types';
+import type { ImageFormat, VideoFormat } from './types';
 import { inferImageFormat } from './url-utils';
+import { inferVideoFormat } from './video-utils';
 
 const WINDOWS_RESERVED_NAMES = /^(con|prn|aux|nul|com[0-9]|lpt[0-9]|conin\$|conout\$)(\..*)?$/i;
 
@@ -226,5 +227,131 @@ export function extractFilenameForSort(targetUrl: string): string {
     } catch {}
   }
   return targetUrl;
+}
+
+const VIDEO_FORMAT_TO_EXTENSION: Record<VideoFormat, string> = {
+  mp4: '.mp4',
+  webm: '.webm',
+  mov: '.mov',
+  m4v: '.m4v',
+  ogg: '.ogv',
+  mkv: '.mkv',
+  avi: '.avi',
+  hls: '.m3u8',
+  dash: '.mpd',
+  unknown: '.mp4',
+};
+
+/**
+ * Builds a safe, cross-platform filename for downloading video files (`video_mode_design.md` §5).
+ */
+export function buildSafeVideoDownloadFilename(options: {
+  targetUrl: string;
+  domain?: string;
+  pageTitle?: string;
+  folderName?: string;
+  itemIndex?: number;
+  format?: VideoFormat;
+  mimeHint?: string;
+  overrideExtension?: string;
+}): string {
+  const {
+    targetUrl,
+    domain,
+    pageTitle,
+    folderName,
+    itemIndex = 1,
+    format,
+    mimeHint,
+    overrideExtension,
+  } = options;
+  const inferredFormat = format ?? inferVideoFormat(targetUrl, mimeHint);
+  const extFromFormat = VIDEO_FORMAT_TO_EXTENSION[inferredFormat];
+
+  let rawStem = '';
+  let rawExt = '';
+
+  if (targetUrl.startsWith('http:') || targetUrl.startsWith('https:')) {
+    try {
+      const parsed = new URL(targetUrl);
+      const segments = parsed.pathname.split('/').filter(Boolean);
+      const lastSegment = segments[segments.length - 1];
+
+      if (lastSegment) {
+        let decoded = lastSegment;
+        try {
+          decoded = decodeURIComponent(lastSegment);
+        } catch {}
+
+        const lastDot = decoded.lastIndexOf('.');
+        if (lastDot > 0 && lastDot < decoded.length - 1) {
+          rawStem = decoded.slice(0, lastDot);
+          rawExt = decoded.slice(lastDot).toLowerCase();
+        } else {
+          rawStem = decoded;
+        }
+      }
+    } catch {}
+  }
+
+  if (!rawStem || rawStem.trim() === '') {
+    const cleanDomain = (domain ?? 'video').replace(ILLEGAL_FILENAME_CHARS, '_');
+    const padded = String(itemIndex).padStart(4, '0');
+    rawStem = `${cleanDomain}_${padded}`;
+  }
+
+  let cleanStem = rawStem.replace(ILLEGAL_FILENAME_CHARS, '_').trim();
+  cleanStem = cleanStem.replace(/^[.\s]+|[.\s]+$/g, '');
+
+  if (!cleanStem) {
+    cleanStem = `video_${String(itemIndex).padStart(4, '0')}`;
+  }
+
+  if (WINDOWS_RESERVED_NAMES.test(cleanStem)) {
+    cleanStem = `_${cleanStem}`;
+  }
+
+  if (cleanStem.length > MAX_FILENAME_STEM_LENGTH) {
+    cleanStem = cleanStem.slice(0, MAX_FILENAME_STEM_LENGTH);
+  }
+
+  let finalExt = overrideExtension ?? rawExt;
+  if (!overrideExtension && (!finalExt || !isValidExtensionForVideoFormat(finalExt, inferredFormat))) {
+    finalExt = extFromFormat;
+  }
+
+  const safeFilename = `${cleanStem}${finalExt}`;
+  const folderCandidate = folderName !== undefined ? folderName : pageTitle;
+  if (folderCandidate !== undefined) {
+    const safeFolder = buildSafeFolderName(folderCandidate, domain);
+    return `${safeFolder}/${safeFilename}`;
+  }
+
+  return safeFilename;
+}
+
+function isValidExtensionForVideoFormat(ext: string, format: VideoFormat): boolean {
+  switch (format) {
+    case 'mp4':
+      return ext === '.mp4';
+    case 'webm':
+      return ext === '.webm';
+    case 'mov':
+      return ext === '.mov' || ext === '.qt';
+    case 'm4v':
+      return ext === '.m4v';
+    case 'ogg':
+      return ext === '.ogv' || ext === '.ogg';
+    case 'mkv':
+      return ext === '.mkv';
+    case 'avi':
+      return ext === '.avi';
+    case 'hls':
+      return ext === '.m3u8';
+    case 'dash':
+      return ext === '.mpd';
+    case 'unknown':
+      return /^\.(mp4|webm|mov|m4v|ogv|ogg|mkv|avi)$/i.test(ext);
+  }
 }
 

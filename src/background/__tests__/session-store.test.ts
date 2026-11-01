@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RawCandidateGroup } from '@shared/types';
+import type { RawCandidateGroup, RawVideoCandidateGroup } from '@shared/types';
 import { SessionStore } from '../session-store';
 
 describe('SessionStore', () => {
@@ -177,5 +177,91 @@ describe('SessionStore', () => {
     store.mergeCandidateGroups(tabId, 2, [], 'Batch Title Override');
     snapshot = store.getSnapshot(tabId);
     expect(snapshot.pageTitle).toBe('Batch Title Override');
+  });
+
+  it('merges video candidates, isolates image vs video selection, and enforces Readiness Gate', () => {
+    const tabId = 201;
+    store.resetSessionForNewPage(tabId, 'https://media.example.com/post', 'scanning', 'Media Post');
+
+    const imgGroups: RawCandidateGroup[] = [
+      {
+        occurrenceKey: 'el_1::img::https://media.example.com/pic.jpg',
+        primaryUrl: 'https://media.example.com/pic.jpg',
+        domOrder: 1,
+        variants: [
+          {
+            url: 'https://media.example.com/pic.jpg',
+            role: 'src',
+            source: 'img',
+            naturalWidth: 800,
+            naturalHeight: 600,
+          },
+        ],
+      },
+    ];
+
+    const videoGroups: RawVideoCandidateGroup[] = [
+      {
+        occurrenceKey: 'el_2::video::https://media.example.com/clip_720.mp4',
+        primaryUrl: 'https://media.example.com/clip_720.mp4',
+        domOrder: 2,
+        durationSec: 42,
+        posterUrl: 'https://media.example.com/poster.jpg',
+        variants: [
+          {
+            url: 'https://media.example.com/clip_720.mp4',
+            role: 'source-tag',
+            source: 'video-source',
+            videoWidth: 1280,
+            videoHeight: 720,
+          },
+          {
+            url: 'https://media.example.com/clip_1080.mp4',
+            role: 'source-tag',
+            source: 'video-source',
+            videoWidth: 1920,
+            videoHeight: 1080,
+          },
+        ],
+      },
+      {
+        occurrenceKey: 'net::resource::https://media.example.com/live/master.m3u8',
+        primaryUrl: 'https://media.example.com/live/master.m3u8',
+        domOrder: 3,
+        durationSec: null,
+        variants: [
+          {
+            url: 'https://media.example.com/live/master.m3u8',
+            role: 'network',
+            source: 'network-resource',
+            videoWidth: null,
+            videoHeight: null,
+          },
+        ],
+      },
+    ];
+
+    store.mergeCandidateGroups(tabId, 1, imgGroups);
+    store.mergeVideoCandidateGroups(tabId, 1, videoGroups, 'https://media.example.com/post');
+
+    let snap = store.getSnapshot(tabId);
+    expect(snap.items).toHaveLength(1);
+    expect(snap.videos).toHaveLength(2);
+    // Automatically picks 1080p MP4
+    expect(snap.videos[0]?.selectedUrl).toBe('https://media.example.com/clip_1080.mp4');
+
+    // Select image and select all videos -> HLS manifest (vid_2) MUST NOT be auto-selected!
+    store.updateSelection(tabId, { mode: 'add_many', itemIds: ['item_1'] }, 'image');
+    store.updateSelection(tabId, { mode: 'add_many', itemIds: ['vid_1', 'vid_2'] }, 'video');
+
+    snap = store.getSnapshot(tabId);
+    expect(snap.selectedIds).toEqual(['item_1']);
+    expect(snap.selectedVideoIds).toEqual(['vid_1']);
+
+    // Clearing video selection MUST NOT clear image selection!
+    store.updateSelection(tabId, { mode: 'clear_all' }, 'video');
+    snap = store.getSnapshot(tabId);
+    expect(snap.selectedVideoIds).toEqual([]);
+    expect(snap.selectedIds).toEqual(['item_1']);
   });
 });

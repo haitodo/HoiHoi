@@ -1,18 +1,29 @@
 import {
   BLOB_DOWNLOAD_MAX_BYTES,
+  INLINE_VIDEO_BLOB_MAX_BYTES,
   MAX_CONCURRENT_DOWNLOADS,
+  MAX_CONCURRENT_VIDEO_DOWNLOADS,
   STORAGE_KEYS,
+  VIDEO_BLOB_MAX_BYTES,
 } from '@shared/constants';
-import { buildSafeDownloadFilename } from '@shared/filename-utils';
+import {
+  buildSafeDownloadFilename,
+  buildSafeVideoDownloadFilename,
+  extractFilenameForSort,
+} from '@shared/filename-utils';
 import type {
   BlobDataUrlResponse,
   MessageResult,
+  PanelInternalRequestMessage,
+  VideoBlobPrepareResponse,
 } from '@shared/messages';
 import type {
   ActiveDownloadIndexEntry,
   DownloadErrorCategory,
   ItemDownloadState,
+  MediaMode,
 } from '@shared/types';
+import { getActiveVideoVariant, inferVideoFormat } from '@shared/video-utils';
 import { sessionStore } from './session-store';
 
 interface QueuedDownloadRequest {
@@ -20,11 +31,20 @@ interface QueuedDownloadRequest {
   itemId: string;
 }
 
+const PROGRESS_POLL_INTERVAL_MS = 500;
+
+function isVideoItemId(itemId: string): boolean {
+  return itemId.startsWith('vid_');
+}
+
 export class DownloadManager {
-  private queue: QueuedDownloadRequest[] = [];
-  private activeCount = 0;
+  private imageQueue: QueuedDownloadRequest[] = [];
+  private videoQueue: QueuedDownloadRequest[] = [];
+  private activeImageCount = 0;
+  private activeVideoCount = 0;
   private activeDownloads = new Map<number, ActiveDownloadIndexEntry>(); // downloadId -> Entry
   private isProcessing = false;
+  private progressPollTimer: ReturnType<typeof setInterval> | null = null;
 
   async init(): Promise<void> {
     await this.hydrateAndReconcile();
@@ -55,12 +75,12 @@ export class DownloadManager {
             this.handleDownloadInterrupted(downloadId, entry, item.error);
           }
         } catch {
-          // Download record no longer accessible
           this.activeDownloads.delete(downloadId);
         }
       }
 
       await this.persistActiveIndex();
+      this.ensureProgressPolling();
       this.pumpQueue();
     } catch (err) {
       console.warn('[WIC] Failed to reconcile active downloads:', err);
@@ -72,29 +92,123 @@ export class DownloadManager {
     if (!session) return;
 
     for (const itemId of itemIds) {
-      const item = session.itemById.get(itemId);
-      if (!item) continue;
-
       const existing = session.downloads.get(itemId);
-      if (existing && (existing.status === 'queued' || existing.status === 'starting' || existing.status === 'in_progress')) {
-        continue; // Already active
+      if (
+        existing &&
+        (existing.status === 'queued' ||
+          existing.status === 'starting' ||
+          existing.status === 'in_progress')
+      ) {
+        continue; // Already queued or active
       }
 
-      const state: ItemDownloadState = {
-        itemId,
-        targetUrl: item.selectedUrl,
-        status: 'queued',
-        retryable: false,
-        updatedAt: Date.now(),
-      };
-      sessionStore.updateDownloadState(tabId, state);
-      this.queue.push({ tabId, itemId });
+      if (isVideoItemId(itemId)) {
+        const video = session.videoById.get(itemId);
+        if (!video) continue;
+
+        const activeVariant = getActiveVideoVariant(video.variants, video.selectedUrl);
+        // Enforce Readiness Gate before queuing
+        if (!activeVariant || activeVariant.readiness !== 'ready') {
+          sessionStore.updateDownloadState(tabId, {
+            itemId,
+            targetUrl: video.selectedUrl,
+            status: 'failed',
+            errorCode: 'READINESS_GATE_BLOCKED',
+            errorCategory: 'auth_or_forbidden',
+            errorMessage:
+              activeVariant?.blockReason ||
+              'この動画は直接ダウンロード条件を満たしていないため保存できません',
+            retryable: false,
+            updatedAt: Date.now(),
+          });
+          continue;
+        }
+
+        const state: ItemDownloadState = {
+          itemId,
+          targetUrl: video.selectedUrl,
+          totalBytes: activeVariant.fileSizeBytes ?? undefined,
+          status: 'queued',
+          retryable: false,
+          updatedAt: Date.now(),
+        };
+        sessionStore.updateDownloadState(tabId, state);
+        this.videoQueue.push({ tabId, itemId });
+      } else {
+        const item = session.itemById.get(itemId);
+        if (!item) continue;
+
+        const state: ItemDownloadState = {
+          itemId,
+          targetUrl: item.selectedUrl,
+          status: 'queued',
+          retryable: false,
+          updatedAt: Date.now(),
+        };
+        sessionStore.updateDownloadState(tabId, state);
+        this.imageQueue.push({ tabId, itemId });
+      }
     }
 
     this.pumpQueue();
   }
 
-  retryFailed(tabId: number, itemIds?: string[]): void {
+  async cancelDownload(tabId: number, itemId: string): Promise<boolean> {
+    // 1. Remove if still waiting in either lane queue
+    const removeQueued = (q: QueuedDownloadRequest[]) => {
+      const idx = q.findIndex((r) => r.tabId === tabId && r.itemId === itemId);
+      if (idx >= 0) {
+        q.splice(idx, 1);
+        return true;
+      }
+      return false;
+    };
+
+    const wasQueued = removeQueued(this.videoQueue) || removeQueued(this.imageQueue);
+    const session = sessionStore.getSession(tabId);
+    const currentDl = session?.downloads.get(itemId);
+
+    if (wasQueued) {
+      sessionStore.updateDownloadState(tabId, {
+        itemId,
+        targetUrl: currentDl?.targetUrl || '',
+        status: 'canceled',
+        errorMessage: 'キャンセルされました',
+        retryable: false,
+        updatedAt: Date.now(),
+      });
+      return true;
+    }
+
+    // 2. Cancel active Chrome download if in progress
+    for (const [downloadId, entry] of this.activeDownloads.entries()) {
+      if (entry.tabId === tabId && entry.itemId === itemId) {
+        try {
+          await chrome.downloads.cancel(downloadId);
+        } catch {}
+        this.cleanupObjectUrlIfNeeded(entry.revokeObjectUrl);
+        this.activeDownloads.delete(downloadId);
+        await this.persistActiveIndex();
+
+        sessionStore.updateDownloadState(tabId, {
+          itemId,
+          targetUrl: entry.targetUrl,
+          downloadId,
+          status: 'canceled',
+          errorMessage: 'キャンセルされました',
+          retryable: false,
+          updatedAt: Date.now(),
+        });
+        this.ensureProgressPolling();
+        this.pumpQueue();
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  retryFailed(tabId: number, itemIds?: string[], mediaMode?: MediaMode): void {
     const session = sessionStore.getSession(tabId);
     if (!session) return;
 
@@ -102,6 +216,9 @@ export class DownloadManager {
     const eligibleIds: string[] = [];
 
     for (const id of targetIds) {
+      if (mediaMode === 'video' && !isVideoItemId(id)) continue;
+      if (mediaMode === 'image' && isVideoItemId(id)) continue;
+
       const dl = session.downloads.get(id);
       if (dl && dl.status === 'failed' && dl.retryable) {
         eligibleIds.push(id);
@@ -113,17 +230,101 @@ export class DownloadManager {
     }
   }
 
+  async saveCapturedFrame(options: {
+    tabId: number;
+    dataUrl: string;
+    sourceVideoUrl: string;
+    timestampSec: number;
+  }): Promise<boolean> {
+    const { tabId, dataUrl, sourceVideoUrl, timestampSec } = options;
+    const session = sessionStore.getSession(tabId);
+    const rawBase = extractFilenameForSort(sourceVideoUrl) || 'video';
+    const dotIdx = rawBase.lastIndexOf('.');
+    const stem = dotIdx > 0 ? rawBase.slice(0, dotIdx) : rawBase;
+    const mins = Math.floor(timestampSec / 60);
+    const secs = Math.floor(timestampSec % 60);
+    const timeTag = `${String(mins).padStart(2, '0')}m${String(secs).padStart(2, '0')}s`;
+
+    const filename = buildSafeDownloadFilename({
+      targetUrl: `https://frame.local/${encodeURIComponent(`${stem}_frame_${timeTag}.png`)}`,
+      domain: session?.domain,
+      pageTitle: session?.pageTitle ?? session?.domain ?? 'frames',
+      format: 'png',
+    });
+
+    try {
+      await chrome.downloads.download({
+        url: dataUrl,
+        filename,
+        conflictAction: 'uniquify',
+        saveAs: false,
+      });
+      return true;
+    } catch (err) {
+      console.warn('[WIC] Failed to save captured video frame:', err);
+      return false;
+    }
+  }
+
+  async saveAssembledStream(options: {
+    tabId: number;
+    itemId: string;
+    objectUrl: string;
+    sourceManifestUrl: string;
+    containerExtension: '.mp4' | '.ts';
+    totalBytes: number;
+  }): Promise<boolean> {
+    const { tabId, itemId, objectUrl, sourceManifestUrl, containerExtension, totalBytes } = options;
+    const session = sessionStore.getSession(tabId);
+    const indexMatch = /^vid_(\d+)$/.exec(itemId);
+    const itemIndex = indexMatch?.[1] ? Number(indexMatch[1]) : 1;
+
+    const filename = buildSafeVideoDownloadFilename({
+      targetUrl: sourceManifestUrl,
+      domain: session?.domain,
+      pageTitle: session?.pageTitle ?? session?.domain ?? 'videos',
+      itemIndex,
+      format: containerExtension === '.mp4' ? 'mp4' : 'unknown',
+      overrideExtension: containerExtension,
+    });
+
+    await this.startChromeDownload({
+      tabId,
+      itemId,
+      targetUrl: sourceManifestUrl,
+      downloadableUrl: objectUrl,
+      filename,
+      totalBytes,
+      revokeObjectUrl: objectUrl,
+    });
+
+    return true;
+  }
+
   private pumpQueue(): void {
     if (this.isProcessing) return;
     this.isProcessing = true;
 
-    while (this.activeCount < MAX_CONCURRENT_DOWNLOADS && this.queue.length > 0) {
-      const next = this.queue.shift();
+    // Lane 1: Image Queue (max 3 concurrent)
+    while (this.activeImageCount < MAX_CONCURRENT_DOWNLOADS && this.imageQueue.length > 0) {
+      const next = this.imageQueue.shift();
       if (!next) break;
 
-      this.activeCount++;
-      void this.executeDownload(next.tabId, next.itemId).finally(() => {
-        this.activeCount--;
+      this.activeImageCount++;
+      void this.executeImageDownload(next.tabId, next.itemId).finally(() => {
+        this.activeImageCount--;
+        this.pumpQueue();
+      });
+    }
+
+    // Lane 2: Video Queue (max 2 concurrent, completely isolated from Image Queue)
+    while (this.activeVideoCount < MAX_CONCURRENT_VIDEO_DOWNLOADS && this.videoQueue.length > 0) {
+      const next = this.videoQueue.shift();
+      if (!next) break;
+
+      this.activeVideoCount++;
+      void this.executeVideoDownload(next.tabId, next.itemId).finally(() => {
+        this.activeVideoCount--;
         this.pumpQueue();
       });
     }
@@ -131,7 +332,7 @@ export class DownloadManager {
     this.isProcessing = false;
   }
 
-  private async executeDownload(tabId: number, itemId: string): Promise<void> {
+  private async executeImageDownload(tabId: number, itemId: string): Promise<void> {
     const session = sessionStore.getSession(tabId);
     if (!session) return;
 
@@ -151,7 +352,6 @@ export class DownloadManager {
 
     let downloadableUrl = targetUrl;
 
-    // 1. Resolve blob: URLs via Content Script if needed
     if (targetUrl.startsWith('blob:')) {
       try {
         const response = (await chrome.tabs.sendMessage(tabId, {
@@ -179,7 +379,6 @@ export class DownloadManager {
         return;
       }
     } else if (variant?.largeDataRefId) {
-      // 2. Resolve evicted large data: URL
       try {
         const response = (await chrome.tabs.sendMessage(tabId, {
           channel: 'WIC_BG_TO_CONTENT',
@@ -206,13 +405,194 @@ export class DownloadManager {
       }
     }
 
-    // Generate safe filename with folder based on page title
     const filename = buildSafeDownloadFilename({
       targetUrl,
       domain: session.domain,
       pageTitle: session.pageTitle ?? session.domain ?? 'images',
       format: variant?.format,
     });
+
+    await this.startChromeDownload({
+      tabId,
+      itemId,
+      targetUrl,
+      downloadableUrl,
+      filename,
+    });
+  }
+
+  private async executeVideoDownload(tabId: number, itemId: string): Promise<void> {
+    const session = sessionStore.getSession(tabId);
+    if (!session) return;
+
+    const video = session.videoById.get(itemId);
+    if (!video) return;
+
+    const variant = getActiveVideoVariant(video.variants, video.selectedUrl);
+    const targetUrl = video.selectedUrl;
+
+    if (!variant || variant.readiness !== 'ready') {
+      sessionStore.updateDownloadState(tabId, {
+        itemId,
+        targetUrl,
+        status: 'failed',
+        errorCode: 'READINESS_GATE_BLOCKED',
+        errorCategory: 'auth_or_forbidden',
+        errorMessage: variant?.blockReason || 'ダウンロード開始条件を満たしていません',
+        retryable: false,
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
+    sessionStore.updateDownloadState(tabId, {
+      itemId,
+      targetUrl,
+      totalBytes: variant.fileSizeBytes ?? undefined,
+      status: 'starting',
+      retryable: false,
+      updatedAt: Date.now(),
+    });
+
+    let downloadableUrl = targetUrl;
+    let resolvedMimeType: string | undefined;
+    let resolvedByteLength: number | undefined = variant.fileSizeBytes ?? undefined;
+    let revokeObjectUrl: string | undefined;
+
+    if (targetUrl.startsWith('blob:')) {
+      const transferId = `vblob_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      try {
+        const response = (await chrome.tabs.sendMessage(tabId, {
+          channel: 'WIC_BG_TO_CONTENT',
+          type: 'BG_PREPARE_VIDEO_BLOB',
+          blobUrl: targetUrl,
+          transferId,
+          inlineMaxBytes: INLINE_VIDEO_BLOB_MAX_BYTES,
+          absoluteMaxBytes: VIDEO_BLOB_MAX_BYTES,
+        })) as MessageResult<VideoBlobPrepareResponse>;
+
+        if (!response.ok) {
+          if (response.code === 'MSE_OR_EXPIRED_BLOB') {
+            sessionStore.updateVideoMetadata(tabId, {
+              url: targetUrl,
+              isMseStream: true,
+            });
+          }
+          throw new Error(response.error);
+        }
+
+        resolvedMimeType = response.data.mimeType;
+        resolvedByteLength = response.data.byteLength;
+        sessionStore.updateVideoMetadata(tabId, {
+          url: targetUrl,
+          fileSizeBytes: resolvedByteLength,
+        });
+
+        if (response.data.mode === 'inline_data_url') {
+          downloadableUrl = response.data.dataUrl;
+        } else {
+          // Request Side Panel window context to assemble streamed chunks into an extension ObjectURL
+          const rpcMsg: PanelInternalRequestMessage = {
+            channel: 'WIC_BG_TO_PANEL_RPC',
+            type: 'PANEL_CREATE_OBJECT_URL_FROM_TRANSFER',
+            transferId,
+          };
+          const panelRes = (await chrome.runtime.sendMessage(rpcMsg)) as MessageResult<string>;
+          if (!panelRes?.ok || !panelRes.data) {
+            throw new Error(
+              panelRes && !panelRes.ok
+                ? panelRes.error
+                : '大容量動画データのブリッジ変換に失敗しました（サイドパネルを開いた状態で実行してください）',
+            );
+          }
+          downloadableUrl = panelRes.data;
+          revokeObjectUrl = panelRes.data;
+        }
+      } catch (err) {
+        sessionStore.updateDownloadState(tabId, {
+          itemId,
+          targetUrl,
+          status: 'failed',
+          errorCode: 'BLOB_UNREACHABLE',
+          errorCategory: 'blob_unreachable',
+          errorMessage: err instanceof Error ? err.message : String(err),
+          retryable: false,
+          updatedAt: Date.now(),
+        });
+        return;
+      }
+    } else if (variant.largeDataRefId) {
+      try {
+        const response = (await chrome.tabs.sendMessage(tabId, {
+          channel: 'WIC_BG_TO_CONTENT',
+          type: 'BG_RESOLVE_LARGE_DATA_URL',
+          largeDataRefId: variant.largeDataRefId,
+        })) as MessageResult<string>;
+
+        if (!response.ok) {
+          throw new Error(response.error);
+        }
+        downloadableUrl = response.data;
+      } catch (err) {
+        sessionStore.updateDownloadState(tabId, {
+          itemId,
+          targetUrl,
+          status: 'failed',
+          errorCode: 'DATA_URL_EXPIRED',
+          errorCategory: 'blob_unreachable',
+          errorMessage: `退避データURLの取得に失敗しました: ${String(err)}`,
+          retryable: false,
+          updatedAt: Date.now(),
+        });
+        return;
+      }
+    }
+
+    const indexMatch = /^vid_(\d+)$/.exec(itemId);
+    const itemIndex = indexMatch?.[1] ? Number(indexMatch[1]) : 1;
+    const effectiveFormat =
+      variant.format !== 'unknown'
+        ? variant.format
+        : inferVideoFormat(targetUrl, resolvedMimeType);
+
+    const filename = buildSafeVideoDownloadFilename({
+      targetUrl,
+      domain: session.domain,
+      pageTitle: session.pageTitle ?? session.domain ?? 'videos',
+      itemIndex,
+      format: effectiveFormat,
+      mimeHint: resolvedMimeType,
+    });
+
+    await this.startChromeDownload({
+      tabId,
+      itemId,
+      targetUrl,
+      downloadableUrl,
+      filename,
+      totalBytes: resolvedByteLength,
+      revokeObjectUrl,
+    });
+  }
+
+  private async startChromeDownload(params: {
+    tabId: number;
+    itemId: string;
+    targetUrl: string;
+    downloadableUrl: string;
+    filename: string;
+    totalBytes?: number;
+    revokeObjectUrl?: string;
+  }): Promise<void> {
+    const {
+      tabId,
+      itemId,
+      targetUrl,
+      downloadableUrl,
+      filename,
+      totalBytes,
+      revokeObjectUrl,
+    } = params;
 
     try {
       const downloadId = await chrome.downloads.download({
@@ -228,6 +608,7 @@ export class DownloadManager {
         itemId,
         targetUrl,
         startedAt: Date.now(),
+        revokeObjectUrl,
       };
 
       this.activeDownloads.set(downloadId, entry);
@@ -238,11 +619,16 @@ export class DownloadManager {
         targetUrl,
         downloadId,
         suggestedFilename: filename,
+        bytesReceived: 0,
+        totalBytes,
         status: 'in_progress',
         retryable: false,
         updatedAt: Date.now(),
       });
+
+      this.ensureProgressPolling();
     } catch (err) {
+      this.cleanupObjectUrlIfNeeded(revokeObjectUrl);
       sessionStore.updateDownloadState(tabId, {
         itemId,
         targetUrl,
@@ -262,9 +648,11 @@ export class DownloadManager {
 
     if (delta.state?.current === 'complete') {
       this.handleDownloadComplete(delta.id, entry);
+      this.ensureProgressPolling();
       this.pumpQueue();
     } else if (delta.state?.current === 'interrupted') {
       this.handleDownloadInterrupted(delta.id, entry, delta.error?.current);
+      this.ensureProgressPolling();
       this.pumpQueue();
     }
   }
@@ -273,6 +661,7 @@ export class DownloadManager {
     downloadId: number,
     entry: ActiveDownloadIndexEntry,
   ): void {
+    this.cleanupObjectUrlIfNeeded(entry.revokeObjectUrl);
     this.activeDownloads.delete(downloadId);
     void this.persistActiveIndex();
 
@@ -291,6 +680,7 @@ export class DownloadManager {
     entry: ActiveDownloadIndexEntry,
     rawError?: string,
   ): void {
+    this.cleanupObjectUrlIfNeeded(entry.revokeObjectUrl);
     this.activeDownloads.delete(downloadId);
     void this.persistActiveIndex();
 
@@ -307,6 +697,75 @@ export class DownloadManager {
       retryable,
       updatedAt: Date.now(),
     });
+  }
+
+  private cleanupObjectUrlIfNeeded(objectUrl?: string): void {
+    if (!objectUrl) return;
+    try {
+      const rpcMsg: PanelInternalRequestMessage = {
+        channel: 'WIC_BG_TO_PANEL_RPC',
+        type: 'PANEL_REVOKE_OBJECT_URL',
+        objectUrl,
+      };
+      chrome.runtime.sendMessage(rpcMsg).catch(() => {});
+    } catch {}
+  }
+
+  private ensureProgressPolling(): void {
+    let hasActiveVideo = false;
+    for (const entry of this.activeDownloads.values()) {
+      if (isVideoItemId(entry.itemId)) {
+        hasActiveVideo = true;
+        break;
+      }
+    }
+
+    if (hasActiveVideo && this.progressPollTimer === null) {
+      this.progressPollTimer = setInterval(() => {
+        void this.pollVideoDownloadProgress();
+      }, PROGRESS_POLL_INTERVAL_MS);
+    } else if (!hasActiveVideo && this.progressPollTimer !== null) {
+      clearInterval(this.progressPollTimer);
+      this.progressPollTimer = null;
+    }
+  }
+
+  private async pollVideoDownloadProgress(): Promise<void> {
+    if (this.activeDownloads.size === 0) {
+      this.ensureProgressPolling();
+      return;
+    }
+
+    const updatesByTab = new Map<
+      number,
+      Array<{ itemId: string; bytesReceived: number; totalBytes?: number }>
+    >();
+
+    for (const [downloadId, entry] of this.activeDownloads.entries()) {
+      if (!isVideoItemId(entry.itemId)) continue;
+      try {
+        const items = await chrome.downloads.search({ id: downloadId });
+        const dl = items[0];
+        if (!dl || dl.state !== 'in_progress') continue;
+
+        let list = updatesByTab.get(entry.tabId);
+        if (!list) {
+          list = [];
+          updatesByTab.set(entry.tabId, list);
+        }
+        list.push({
+          itemId: entry.itemId,
+          bytesReceived: dl.bytesReceived,
+          totalBytes: dl.totalBytes > 0 ? dl.totalBytes : undefined,
+        });
+      } catch {
+        // Ignore transient search error
+      }
+    }
+
+    for (const [tabId, updates] of updatesByTab.entries()) {
+      sessionStore.emitDownloadProgress(tabId, updates);
+    }
   }
 
   private async persistActiveIndex(): Promise<void> {

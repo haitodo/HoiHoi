@@ -6,7 +6,7 @@ import {
   SCAN_CHUNK_BUDGET_MS,
 } from '@shared/constants';
 import type { ContentToBackgroundMessage } from '@shared/messages';
-import type { RawCandidateGroup } from '@shared/types';
+import type { RawCandidateGroup, RawVideoCandidateGroup } from '@shared/types';
 import {
   extractFromCssBackground,
   extractFromImageElement,
@@ -14,6 +14,14 @@ import {
   extractFromSvgImage,
   type ExtractorContext,
 } from './dom-extractor';
+import { createNetworkMediaObserver } from './network-media-observer';
+import {
+  collectShadowDomVideos,
+  extractFromVideoElement,
+  extractFromVideoLinkOrLazyElement,
+  extractPageMetadataVideos,
+  tryCaptureReadyVideoFrame,
+} from './video-extractor';
 
 export interface ChunkRunnerController {
   startOrRescan(scanEpoch: number): void;
@@ -21,10 +29,12 @@ export interface ChunkRunnerController {
 }
 
 // Highly selective query to avoid running expensive getComputedStyle on thousands of plain elements
-const IMAGE_TARGET_SELECTOR = [
+const MEDIA_TARGET_SELECTOR = [
   'img',
   'picture',
+  'video',
   'source',
+  'a[href]',
   'svg image',
   '[data-src]',
   '[data-original]',
@@ -33,6 +43,13 @@ const IMAGE_TARGET_SELECTOR = [
   '[data-url]',
   '[data-hi-res-src]',
   '[data-srcset]',
+  '[data-video-src]',
+  '[data-video]',
+  '[data-video-url]',
+  '[data-mp4]',
+  '[data-webm]',
+  '[data-stream]',
+  '[data-hls]',
   '[style*="background"]',
   '[style*="url("]',
 ].join(', ');
@@ -101,6 +118,7 @@ export function createChunkRunner(options: {
   let elementCounter = 0;
   let domOrderCounter = 0;
   const elementIdMap = new WeakMap<Element, number>();
+  const shadowVideoSet = new WeakSet<HTMLVideoElement>();
 
   const extractorContext: ExtractorContext = {
     get baseUri() {
@@ -112,8 +130,11 @@ export function createChunkRunner(options: {
     domOrderCounter: () => ++domOrderCounter,
   };
 
-  // Batch buffer for candidate groups
+  const networkObserver = createNetworkMediaObserver(extractorContext);
+
+  // Unified batch buffers for image & video candidate groups
   let batchBuffer: RawCandidateGroup[] = [];
+  let videoBatchBuffer: RawVideoCandidateGroup[] = [];
   let batchFlushTimer: number | null = null;
   let totalCandidatesSent = 0;
   let isObserving = false;
@@ -125,7 +146,10 @@ export function createChunkRunner(options: {
     } catch {}
     try {
       window.removeEventListener('load', onCaptureLoad, true);
+      window.removeEventListener('loadedmetadata', onCaptureVideoMetadata, true);
+      window.removeEventListener('encrypted', onCaptureVideoEncrypted, true);
     } catch {}
+    networkObserver.stopObserving();
     isObserving = false;
   }
 
@@ -139,6 +163,13 @@ export function createChunkRunner(options: {
         attributeFilter: OBSERVED_MUTATION_ATTRIBUTES as string[],
       });
       window.addEventListener('load', onCaptureLoad, true);
+      window.addEventListener('loadedmetadata', onCaptureVideoMetadata, true);
+      window.addEventListener('encrypted', onCaptureVideoEncrypted, true);
+      networkObserver.startObserving((groups) => {
+        for (const g of groups) {
+          enqueueVideoGroup(g);
+        }
+      });
       isObserving = true;
     } catch (err) {
       console.warn('[WIC Content] Failed to start DOM observer:', err);
@@ -166,6 +197,7 @@ export function createChunkRunner(options: {
 
     pendingElements = [];
     batchBuffer = [];
+    videoBatchBuffer = [];
     mutatedElements.clear();
   }
 
@@ -180,11 +212,13 @@ export function createChunkRunner(options: {
       batchFlushTimer = null;
     }
 
-    if (batchBuffer.length === 0) return;
+    if (batchBuffer.length === 0 && videoBatchBuffer.length === 0) return;
 
     const groupsToSend = batchBuffer;
+    const videoGroupsToSend = videoBatchBuffer;
     batchBuffer = [];
-    totalCandidatesSent += groupsToSend.length;
+    videoBatchBuffer = [];
+    totalCandidatesSent += groupsToSend.length + videoGroupsToSend.length;
 
     const message: ContentToBackgroundMessage = {
       channel: 'WIC_CONTENT_TO_BG',
@@ -193,9 +227,21 @@ export function createChunkRunner(options: {
       pageUrl: window.location.href,
       pageTitle: document.title || undefined,
       groups: groupsToSend,
+      videoGroups: videoGroupsToSend.length > 0 ? videoGroupsToSend : undefined,
     };
 
     safeSendMessage(message, destroy);
+  }
+
+  function scheduleFlushCheck() {
+    const bufferedTotal = batchBuffer.length + videoBatchBuffer.length;
+    if (totalCandidatesSent === 0 && bufferedTotal >= 5) {
+      flushBatch();
+    } else if (bufferedTotal >= SCAN_BATCH_MAX_SIZE) {
+      flushBatch();
+    } else if (batchFlushTimer === null) {
+      batchFlushTimer = window.setTimeout(flushBatch, SCAN_BATCH_INTERVAL_MS);
+    }
   }
 
   function enqueueGroup(group: RawCandidateGroup) {
@@ -203,16 +249,17 @@ export function createChunkRunner(options: {
       destroy();
       return;
     }
-
     batchBuffer.push(group);
-    // Flush immediately on very first discovery so UI renders right away
-    if (totalCandidatesSent === 0 && batchBuffer.length >= 5) {
-      flushBatch();
-    } else if (batchBuffer.length >= SCAN_BATCH_MAX_SIZE) {
-      flushBatch();
-    } else if (batchFlushTimer === null) {
-      batchFlushTimer = window.setTimeout(flushBatch, SCAN_BATCH_INTERVAL_MS);
+    scheduleFlushCheck();
+  }
+
+  function enqueueVideoGroup(group: RawVideoCandidateGroup) {
+    if (isDestroyed || !isExtensionContextValid()) {
+      destroy();
+      return;
     }
+    videoBatchBuffer.push(group);
+    scheduleFlushCheck();
   }
 
   // Active queue of elements pending inspection
@@ -228,13 +275,43 @@ export function createChunkRunner(options: {
       return;
     }
 
+    if (el instanceof HTMLVideoElement) {
+      const { videoGroup, posterImageGroup } = extractFromVideoElement(
+        el,
+        extractorContext,
+        shadowVideoSet.has(el),
+      );
+      if (videoGroup) enqueueVideoGroup(videoGroup);
+      if (posterImageGroup) enqueueGroup(posterImageGroup);
+      return;
+    }
+
+    if (el instanceof HTMLSourceElement) {
+      if (el.parentElement instanceof HTMLVideoElement) {
+        const { videoGroup, posterImageGroup } = extractFromVideoElement(
+          el.parentElement,
+          extractorContext,
+          shadowVideoSet.has(el.parentElement),
+        );
+        if (videoGroup) enqueueVideoGroup(videoGroup);
+        if (posterImageGroup) enqueueGroup(posterImageGroup);
+      }
+      return;
+    }
+
     if (el instanceof SVGImageElement) {
       const group = extractFromSvgImage(el, extractorContext);
       if (group) enqueueGroup(group);
       return;
     }
 
-    // Lazy attributes on non-img elements
+    // Video links (<a href="*.mp4">) & explicit lazy video attributes
+    const videoLinkGroup = extractFromVideoLinkOrLazyElement(el, extractorContext);
+    if (videoLinkGroup) {
+      enqueueVideoGroup(videoLinkGroup);
+    }
+
+    // Lazy image attributes on non-img elements
     const lazyGroup = extractFromLazyAttributes(el, extractorContext);
     if (lazyGroup) enqueueGroup(lazyGroup);
 
@@ -275,7 +352,9 @@ export function createChunkRunner(options: {
     pendingIndex = 0;
     flushBatch();
 
-    console.log(`[WIC Content] Scan complete for epoch ${currentScanEpoch}. Total candidates: ${totalCandidatesSent}`);
+    console.log(
+      `[WIC Content] Scan complete for epoch ${currentScanEpoch}. Total candidates: ${totalCandidatesSent}`,
+    );
 
     // Notify background SW that initial traversal for current scanEpoch is done
     const statusMsg: ContentToBackgroundMessage = {
@@ -298,12 +377,13 @@ export function createChunkRunner(options: {
     for (const el of elements) {
       pendingElements.push(el);
     }
+
     if (!isSliceRunning && sliceTimer === null) {
       sliceTimer = window.setTimeout(runNextSlice, 0);
     }
   }
 
-  // MutationObserver for dynamic additions / attribute changes (e.g. manual scroll)
+  // MutationObserver for dynamic additions / attribute changes (e.g. manual scroll or SPA player mount)
   let mutationDebounceTimer: number | null = null;
   const mutatedElements = new Set<Element>();
 
@@ -318,12 +398,19 @@ export function createChunkRunner(options: {
         for (let i = 0; i < mut.addedNodes.length; i++) {
           const node = mut.addedNodes[i];
           if (node instanceof Element) {
-            if (node.matches(IMAGE_TARGET_SELECTOR)) {
+            if (node.matches(MEDIA_TARGET_SELECTOR)) {
               mutatedElements.add(node);
             }
-            const descendants = node.querySelectorAll(IMAGE_TARGET_SELECTOR);
+            const descendants = node.querySelectorAll(MEDIA_TARGET_SELECTOR);
             for (let j = 0; j < descendants.length; j++) {
               mutatedElements.add(descendants[j]!);
+            }
+            if (node.shadowRoot) {
+              const sVideos = collectShadowDomVideos(node.shadowRoot);
+              for (const sv of sVideos) {
+                shadowVideoSet.add(sv);
+                mutatedElements.add(sv);
+              }
             }
           }
         }
@@ -377,6 +464,62 @@ export function createChunkRunner(options: {
     }
   };
 
+  // Passively track video metadata when the webpage itself loads/plays a video
+  const onCaptureVideoMetadata = (e: Event) => {
+    if (isDestroyed || !isExtensionContextValid()) {
+      destroy();
+      return;
+    }
+    const target = e.target;
+    if (target instanceof HTMLVideoElement) {
+      const url = target.currentSrc || target.src;
+      if (!url) return;
+
+      const d = target.duration;
+      const isLive = d === Number.POSITIVE_INFINITY;
+      const durationSec = !isLive && Number.isFinite(d) && d > 0 ? d : null;
+      const posterUrl = target.poster ? undefined : tryCaptureReadyVideoFrame(target);
+
+      const msg: ContentToBackgroundMessage = {
+        channel: 'WIC_CONTENT_TO_BG',
+        type: 'CONTENT_VIDEO_METADATA_LOADED',
+        scanEpoch: currentScanEpoch,
+        url,
+        videoWidth: target.videoWidth > 0 ? target.videoWidth : null,
+        videoHeight: target.videoHeight > 0 ? target.videoHeight : null,
+        durationSec,
+        isLive: isLive || undefined,
+        posterUrl,
+        isDrmProtected: Boolean(target.mediaKeys !== null) || undefined,
+      };
+      safeSendMessage(msg, destroy);
+    }
+  };
+
+  const onCaptureVideoEncrypted = (e: Event) => {
+    if (isDestroyed || !isExtensionContextValid()) {
+      destroy();
+      return;
+    }
+    const target = e.target;
+    if (target instanceof HTMLVideoElement) {
+      const url = target.currentSrc || target.src;
+      if (!url) return;
+
+      const msg: ContentToBackgroundMessage = {
+        channel: 'WIC_CONTENT_TO_BG',
+        type: 'CONTENT_VIDEO_METADATA_LOADED',
+        scanEpoch: currentScanEpoch,
+        url,
+        videoWidth: target.videoWidth > 0 ? target.videoWidth : null,
+        videoHeight: target.videoHeight > 0 ? target.videoHeight : null,
+        durationSec: null,
+        isDrmProtected: true,
+      };
+      safeSendMessage(msg, destroy);
+    }
+  };
+
   return {
     startOrRescan(scanEpoch: number) {
       if (!isExtensionContextValid()) {
@@ -390,7 +533,6 @@ export function createChunkRunner(options: {
 
       currentScanEpoch = scanEpoch;
       totalCandidatesSent = 0;
-      // Abort any in-progress slices and clear buffers
       if (sliceTimer !== null) {
         clearTimeout(sliceTimer);
         sliceTimer = null;
@@ -399,6 +541,7 @@ export function createChunkRunner(options: {
       pendingElements = [];
       pendingIndex = 0;
       batchBuffer = [];
+      videoBatchBuffer = [];
 
       // Notify scan in progress
       const statusMsg: ContentToBackgroundMessage = {
@@ -411,9 +554,29 @@ export function createChunkRunner(options: {
       };
       safeSendMessage(statusMsg, destroy);
 
-      // Targeted fast query for image elements
-      const directTargets = Array.from(document.querySelectorAll(IMAGE_TARGET_SELECTOR));
-      console.log(`[WIC Content] Starting scan for epoch ${scanEpoch}. Found ${directTargets.length} potential image elements.`);
+      // Layer 2: Passive OGP / JSON-LD metadata extraction
+      const metaVideoGroups = extractPageMetadataVideos(document, extractorContext);
+      for (const g of metaVideoGroups) {
+        enqueueVideoGroup(g);
+      }
+
+      // Layer 3: Passive buffered PerformanceResourceTiming inspection
+      const networkVideoGroups = networkObserver.scanBufferedEntries();
+      for (const g of networkVideoGroups) {
+        enqueueVideoGroup(g);
+      }
+
+      // Layer 1: Targeted fast DOM query + Open Shadow DOM videos
+      const directTargets = Array.from(document.querySelectorAll(MEDIA_TARGET_SELECTOR));
+      const shadowVideos = collectShadowDomVideos(document);
+      for (const sv of shadowVideos) {
+        shadowVideoSet.add(sv);
+        directTargets.push(sv);
+      }
+
+      console.log(
+        `[WIC Content] Starting scan for epoch ${scanEpoch}. Found ${directTargets.length} potential media elements.`,
+      );
       scheduleElements(directTargets);
     },
     destroy,

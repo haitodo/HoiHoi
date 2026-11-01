@@ -1,7 +1,8 @@
 import React from 'react';
-import type { ScanStatus } from '@shared/types';
+import type { MediaMode, ScanStatus } from '@shared/types';
 
 interface EmptyOrStatusViewProps {
+  mediaMode?: MediaMode;
   scanStatus: ScanStatus;
   statusMessage?: string;
   isFilterEmpty: boolean;
@@ -10,12 +11,15 @@ interface EmptyOrStatusViewProps {
 }
 
 export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
+  mediaMode = 'image',
   scanStatus,
   statusMessage,
   isFilterEmpty,
   onClearFilter,
   onRescan,
 }) => {
+  const isVideo = mediaMode === 'video';
+  const mediaNoun = isVideo ? '動画' : '画像';
   let title = '';
   let description = '';
   let action: React.ReactNode = null;
@@ -85,8 +89,8 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
       );
     }
   } else if (isFilterEmpty) {
-    title = '条件に合う画像がありません';
-    description = '設定されているフィルターや検索ワードに一致する画像が見つかりませんでした。';
+    title = `条件に合う${mediaNoun}がありません`;
+    description = `設定されているフィルターや検索ワードに一致する${mediaNoun}が見つかりませんでした。`;
     if (onClearFilter) {
       action = (
         <button
@@ -107,12 +111,13 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
       );
     }
   } else if (scanStatus === 'scanning') {
-    title = '画像を探しています...';
-    description = 'ページ内の画像をスキャンしています。見つかった画像から順次表示されます。';
+    title = `${mediaNoun}を探しています...`;
+    description = `ページ内の${mediaNoun}をスキャンしています。見つかったものから順次表示されます。`;
   } else {
-    title = '画像が見つかりませんでした';
-    description =
-      'この Web ページ内から検出可能な画像（img, picture, CSS 背景画像, SVG など）が見つかりませんでした。ページを手動スクロールすると遅延読み込み画像が追加される場合があります。';
+    title = `${mediaNoun}が見つかりませんでした`;
+    description = isVideo
+      ? 'この Web ページ内から検出可能な動画（video要素、動画直リンク、構造化メタデータ等）が見つかりませんでした。ページ上で動画を再生開始すると検出される場合があります。'
+      : 'この Web ページ内から検出可能な画像（img, picture, CSS 背景画像, SVG など）が見つかりませんでした。ページを手動スクロールすると遅延読み込み画像が追加される場合があります。';
   }
 
   return (

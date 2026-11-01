@@ -1,10 +1,14 @@
 import { isBgToContentMessage } from '@shared/messages';
-import { readBlobAsDataUrl } from './blob-reader';
+import {
+  fetchTextOnDemand,
+  prepareOrStreamVideoBlob,
+  readBlobAsDataUrl,
+} from './blob-reader';
 import { createChunkRunner, type ChunkRunnerController } from './chunk-runner';
 
 /**
  * Robust Content Script (`dist/content/scanner.js`)
- * Runs directly on webpages (via manifest content_scripts + dynamic fallback).
+ * Runs directly on webpages (via dynamic injection + singleton guard).
  */
 
 interface WicScannerController {
@@ -73,6 +77,43 @@ function createScannerController(): WicScannerController {
           })
           .catch((err: unknown) => {
             sendResponse({ ok: false, error: String(err), code: 'BLOB_FETCH_FAILED' });
+          });
+        return true;
+      }
+
+      case 'BG_PREPARE_VIDEO_BLOB': {
+        prepareOrStreamVideoBlob({
+          blobUrl: message.blobUrl,
+          transferId: message.transferId,
+          inlineMaxBytes: message.inlineMaxBytes,
+          absoluteMaxBytes: message.absoluteMaxBytes,
+        })
+          .then((res) => {
+            sendResponse({ ok: true, data: res });
+          })
+          .catch((err: unknown) => {
+            const code =
+              (err as { code?: string })?.code ?? 'VIDEO_BLOB_PREPARE_FAILED';
+            sendResponse({
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+              code,
+            });
+          });
+        return true;
+      }
+
+      case 'BG_FETCH_TEXT_ON_DEMAND': {
+        fetchTextOnDemand(message.url, message.maxChars)
+          .then((text) => {
+            sendResponse({ ok: true, data: text });
+          })
+          .catch((err: unknown) => {
+            sendResponse({
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+              code: 'MANIFEST_FETCH_FAILED',
+            });
           });
         return true;
       }

@@ -4,7 +4,17 @@ import {
   type MessageResult,
   type PanelToBackgroundMessage,
 } from '@shared/messages';
-import type { ImageItem, ItemDownloadState, TabSessionSnapshot } from '@shared/types';
+import type {
+  ImageItem,
+  ItemDownloadState,
+  MediaMode,
+  TabSessionSnapshot,
+  VideoItem,
+} from '@shared/types';
+import {
+  downloadAndAssembleHlsVod,
+  type HlsStreamMergeProgress,
+} from '../utils/hls-saver';
 
 export function useTabSession(tabId: number | null) {
   const [snapshot, setSnapshot] = useState<TabSessionSnapshot | null>(null);
@@ -47,7 +57,6 @@ export function useTabSession(tabId: number | null) {
     const handleMessage = (msg: unknown) => {
       if (!isBgToPanelEvent(msg)) return;
       if (msg.type === 'EVENT_ACTION_CLICKED') return;
-      // Accept events for current tab, or if tabId was not yet resolved (<= 0)
       if (tabId !== null && tabId > 0 && msg.tabId !== tabId) return;
 
       if (msg.type === 'EVENT_SESSION_REPLACED') {
@@ -56,11 +65,38 @@ export function useTabSession(tabId: number | null) {
         return;
       }
 
+      // Ephemeral live progress updates do not advance revision
+      if (msg.type === 'EVENT_DOWNLOAD_PROGRESS') {
+        setSnapshot((prev) => {
+          if (!prev) return null;
+          let changed = false;
+          const nextDownloads: Record<string, ItemDownloadState> = { ...prev.downloads };
+          for (const u of msg.updates) {
+            const existing = nextDownloads[u.itemId];
+            if (existing && existing.status === 'in_progress') {
+              nextDownloads[u.itemId] = {
+                ...existing,
+                bytesReceived: u.bytesReceived,
+                totalBytes: u.totalBytes ?? existing.totalBytes,
+              };
+              changed = true;
+            }
+          }
+          return changed ? { ...prev, downloads: nextDownloads } : prev;
+        });
+        return;
+      }
+
+      // Self-heal if any delta event was missed
+      if (revisionRef.current > 0 && msg.revision !== revisionRef.current + 1) {
+        void fetchSnapshot(msg.tabId);
+        return;
+      }
+
       revisionRef.current = msg.revision;
 
       setSnapshot((prev) => {
         if (!prev) {
-          // If we didn't have a snapshot yet, trigger a full fetch
           void fetchSnapshot(msg.tabId);
           return null;
         }
@@ -78,7 +114,6 @@ export function useTabSession(tabId: number | null) {
               }
               return existing;
             });
-            // Append newly added items
             for (const newItem of upsertMap.values()) {
               nextItems.push(newItem);
             }
@@ -86,6 +121,30 @@ export function useTabSession(tabId: number | null) {
               ...prev,
               revision: msg.revision,
               items: nextItems,
+              scanStatus: msg.scanStatus || 'watching',
+            };
+          }
+
+          case 'EVENT_VIDEOS_UPSERTED': {
+            const upsertMap = new Map<string, VideoItem>(
+              msg.upsertedVideos.map((v) => [v.itemId, v]),
+            );
+            const currentVideos = prev.videos || [];
+            const nextVideos = currentVideos.map((existing) => {
+              const updated = upsertMap.get(existing.itemId);
+              if (updated) {
+                upsertMap.delete(existing.itemId);
+                return updated;
+              }
+              return existing;
+            });
+            for (const newVideo of upsertMap.values()) {
+              nextVideos.push(newVideo);
+            }
+            return {
+              ...prev,
+              revision: msg.revision,
+              videos: nextVideos,
               scanStatus: msg.scanStatus || 'watching',
             };
           }
@@ -104,6 +163,14 @@ export function useTabSession(tabId: number | null) {
               ...prev,
               revision: msg.revision,
               selectedIds: msg.selectedIds,
+            };
+          }
+
+          case 'EVENT_VIDEO_SELECTION_CHANGED': {
+            return {
+              ...prev,
+              revision: msg.revision,
+              selectedVideoIds: msg.selectedVideoIds,
             };
           }
 
@@ -145,22 +212,26 @@ export function useTabSession(tabId: number | null) {
     }
   }, [tabId]);
 
-  const sendPanelMessage = useCallback(async (msg: PanelToBackgroundMessage) => {
+  const sendPanelMessage = useCallback(async <T = undefined>(
+    msg: PanelToBackgroundMessage,
+  ): Promise<MessageResult<T> | undefined> => {
     try {
-      if (typeof chrome === 'undefined' || !chrome.runtime?.id) return;
-      await chrome.runtime.sendMessage(msg);
+      if (typeof chrome === 'undefined' || !chrome.runtime?.id) return undefined;
+      return (await chrome.runtime.sendMessage(msg)) as MessageResult<T>;
     } catch (err) {
       console.warn('[WIC Panel] sendMessage failed:', err);
+      return undefined;
     }
   }, []);
 
   const toggleSelection = useCallback(
-    async (itemId: string) => {
+    async (itemId: string, mediaMode: MediaMode = 'image') => {
       if (tabId === null) return;
       const msg: PanelToBackgroundMessage = {
         channel: 'WIC_PANEL_TO_BG',
         type: 'PANEL_UPDATE_SELECTION',
         tabId,
+        mediaMode,
         mutation: { mode: 'toggle_one', itemId },
       };
       await sendPanelMessage(msg);
@@ -169,12 +240,13 @@ export function useTabSession(tabId: number | null) {
   );
 
   const selectAllVisible = useCallback(
-    async (itemIds: string[]) => {
+    async (itemIds: string[], mediaMode: MediaMode = 'image') => {
       if (tabId === null) return;
       const msg: PanelToBackgroundMessage = {
         channel: 'WIC_PANEL_TO_BG',
         type: 'PANEL_UPDATE_SELECTION',
         tabId,
+        mediaMode,
         mutation: { mode: 'add_many', itemIds },
       };
       await sendPanelMessage(msg);
@@ -182,16 +254,20 @@ export function useTabSession(tabId: number | null) {
     [tabId, sendPanelMessage],
   );
 
-  const clearAllSelection = useCallback(async () => {
-    if (tabId === null) return;
-    const msg: PanelToBackgroundMessage = {
-      channel: 'WIC_PANEL_TO_BG',
-      type: 'PANEL_UPDATE_SELECTION',
-      tabId,
-      mutation: { mode: 'clear_all' },
-    };
-    await sendPanelMessage(msg);
-  }, [tabId, sendPanelMessage]);
+  const clearAllSelection = useCallback(
+    async (mediaMode: MediaMode = 'image') => {
+      if (tabId === null) return;
+      const msg: PanelToBackgroundMessage = {
+        channel: 'WIC_PANEL_TO_BG',
+        type: 'PANEL_UPDATE_SELECTION',
+        tabId,
+        mediaMode,
+        mutation: { mode: 'clear_all' },
+      };
+      await sendPanelMessage(msg);
+    },
+    [tabId, sendPanelMessage],
+  );
 
   const selectVariant = useCallback(
     async (itemId: string, variantUrl: string) => {
@@ -225,9 +301,82 @@ export function useTabSession(tabId: number | null) {
     [tabId, sendPanelMessage],
   );
 
+  const reportVideoMetadata = useCallback(
+    (
+      itemId: string,
+      variantUrl: string,
+      width: number | null,
+      height: number | null,
+      durationSec: number | null,
+    ) => {
+      if (tabId === null) return;
+      const msg: PanelToBackgroundMessage = {
+        channel: 'WIC_PANEL_TO_BG',
+        type: 'PANEL_REPORT_VIDEO_METADATA',
+        tabId,
+        itemId,
+        variantUrl,
+        videoWidth: width,
+        videoHeight: height,
+        durationSec,
+      };
+      void sendPanelMessage(msg);
+    },
+    [tabId, sendPanelMessage],
+  );
+
+  const resolveHlsManifest = useCallback(
+    async (itemId: string, manifestUrl: string) => {
+      if (tabId === null) return undefined;
+      const msg: PanelToBackgroundMessage = {
+        channel: 'WIC_PANEL_TO_BG',
+        type: 'PANEL_RESOLVE_HLS_MANIFEST',
+        tabId,
+        itemId,
+        manifestUrl,
+      };
+      return sendPanelMessage<{ addedCount: number; isDrmEncrypted: boolean }>(msg);
+    },
+    [tabId, sendPanelMessage],
+  );
+
+  const mergeAndSaveHlsStream = useCallback(
+    async (
+      itemId: string,
+      manifestUrl: string,
+      signal: AbortSignal,
+      onProgress?: (progress: HlsStreamMergeProgress) => void,
+    ): Promise<void> => {
+      if (tabId === null) {
+        throw new Error('対象タブが選択されていません');
+      }
+      const assembled = await downloadAndAssembleHlsVod({
+        tabId,
+        manifestUrl,
+        signal,
+        onProgress,
+      });
+      const msg: PanelToBackgroundMessage = {
+        channel: 'WIC_PANEL_TO_BG',
+        type: 'PANEL_SAVE_ASSEMBLED_STREAM',
+        tabId,
+        itemId,
+        objectUrl: assembled.objectUrl,
+        sourceManifestUrl: assembled.resolvedManifestUrl,
+        containerExtension: assembled.containerExtension,
+        totalBytes: assembled.totalBytes,
+      };
+      const res = await sendPanelMessage(msg);
+      if (!res?.ok) {
+        throw new Error(res && !res.ok ? res.error : '結合データの保存開始に失敗しました');
+      }
+    },
+    [tabId, sendPanelMessage],
+  );
+
   const enqueueDownloads = useCallback(
     async (itemIds: string[]) => {
-      if (tabId === null) return;
+      if (tabId === null || itemIds.length === 0) return;
       const msg: PanelToBackgroundMessage = {
         channel: 'WIC_PANEL_TO_BG',
         type: 'PANEL_ENQUEUE_DOWNLOADS',
@@ -239,13 +388,45 @@ export function useTabSession(tabId: number | null) {
     [tabId, sendPanelMessage],
   );
 
+  const cancelDownload = useCallback(
+    async (itemId: string) => {
+      if (tabId === null) return;
+      const msg: PanelToBackgroundMessage = {
+        channel: 'WIC_PANEL_TO_BG',
+        type: 'PANEL_CANCEL_DOWNLOAD',
+        tabId,
+        itemId,
+      };
+      await sendPanelMessage(msg);
+    },
+    [tabId, sendPanelMessage],
+  );
+
+  const saveCapturedFrame = useCallback(
+    async (dataUrl: string, sourceVideoUrl: string, timestampSec: number): Promise<boolean> => {
+      if (tabId === null) return false;
+      const msg: PanelToBackgroundMessage = {
+        channel: 'WIC_PANEL_TO_BG',
+        type: 'PANEL_SAVE_CAPTURED_FRAME',
+        tabId,
+        dataUrl,
+        sourceVideoUrl,
+        timestampSec,
+      };
+      const res = await sendPanelMessage(msg);
+      return Boolean(res?.ok);
+    },
+    [tabId, sendPanelMessage],
+  );
+
   const retryFailedDownloads = useCallback(
-    async (itemIds?: string[]) => {
+    async (itemIds?: string[], mediaMode?: MediaMode) => {
       if (tabId === null) return;
       const msg: PanelToBackgroundMessage = {
         channel: 'WIC_PANEL_TO_BG',
         type: 'PANEL_RETRY_FAILED_DOWNLOADS',
         tabId,
+        mediaMode,
         itemIds,
       };
       await sendPanelMessage(msg);
@@ -254,12 +435,17 @@ export function useTabSession(tabId: number | null) {
   );
 
   const batchSelectVariants = useCallback(
-    async (target: 'high_res' | 'display', itemIds?: string[]) => {
+    async (
+      target: 'high_res' | 'display',
+      itemIds?: string[],
+      mediaMode: MediaMode = 'image',
+    ) => {
       if (tabId === null) return;
       const msg: PanelToBackgroundMessage = {
         channel: 'WIC_PANEL_TO_BG',
         type: 'PANEL_BATCH_SELECT_VARIANTS',
         tabId,
+        mediaMode,
         target,
         itemIds,
       };
@@ -278,7 +464,12 @@ export function useTabSession(tabId: number | null) {
     selectVariant,
     batchSelectVariants,
     reportThumbDimensions,
+    reportVideoMetadata,
+    resolveHlsManifest,
+    mergeAndSaveHlsStream,
     enqueueDownloads,
+    cancelDownload,
+    saveCapturedFrame,
     retryFailedDownloads,
   };
 }
