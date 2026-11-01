@@ -9,7 +9,7 @@ Write-Host ""
 
 $rootPath = Split-Path -Parent $PSScriptRoot
 
-Write-Host "[1/3] 拡張機能の最新版をビルドしています..." -ForegroundColor Yellow
+Write-Host "[1/2] 拡張機能の最新版をビルドしています..." -ForegroundColor Yellow
 Set-Location $rootPath
 & pnpm build
 if ($LASTEXITCODE -ne 0) {
@@ -28,27 +28,48 @@ $choice = Read-Host "番号を入力してEnter (未入力は 1)"
 $distPath = Join-Path $rootPath "dist"
 
 if ($choice -eq "2") {
-    Write-Host "`n[2/3] Google Chrome の拡張機能管理画面を開いています..." -ForegroundColor Yellow
-    Start-Process "chrome.exe" "chrome://extensions"
+    $browserName = "Google Chrome"
+    $extUrl = "chrome://extensions"
     $btnName = "パッケージ化されていない拡張機能を読み込む"
     $devPos = "画面右上"
+    Start-Process "chrome.exe"
 } else {
-    Write-Host "`n[2/3] Microsoft Edge の拡張機能管理画面を開いています..." -ForegroundColor Yellow
-    Start-Process "msedge.exe" "edge://extensions"
+    $browserName = "Microsoft Edge"
+    $extUrl = "edge://extensions"
     $btnName = "展開して読み込む"
     $devPos = "画面左下または上部"
+    Start-Process "msedge.exe"
 }
 
-Write-Host "`n[3/3] 読み込むフォルダ (dist) をエクスプローラーで開いています..." -ForegroundColor Yellow
+# Copy URL to clipboard for 1-click convenience
+try {
+    Set-Clipboard -Value $extUrl
+    $clipboardNote = "（クリップボードにコピー済み！ アドレスバーで Ctrl + V を押して Enter）"
+} catch {
+    $clipboardNote = ""
+}
+
+Write-Host "`n[2/2] 読み込むフォルダ (dist) をエクスプローラーで開いています..." -ForegroundColor Yellow
 Start-Process "explorer.exe" $distPath
 
 Write-Host ""
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   【完了までの簡単3ステップ】" -ForegroundColor Cyan
+Write-Host "   【ブラウザでの簡単インストール手順】" -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "  1. ブラウザ画面の「$devPos」にある「開発者モード」を ON にする" -ForegroundColor White
-Write-Host "  2. 表示される「$btnName」をクリックする" -ForegroundColor White
-Write-Host "  3. 開いたエクスプローラーの「dist」フォルダーを選択する" -ForegroundColor Yellow
+Write-Host "  セキュリティ制限のため、ブラウザの内部URLは手動で開く必要があります。" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  手順A (最速):" -ForegroundColor Yellow
+Write-Host "    1. ブラウザのアドレスバーに「 $extUrl 」を入力して Enter" -ForegroundColor White
+Write-Host "       $clipboardNote" -ForegroundColor Cyan
+Write-Host "    2. 「開発者モード」を ON にする" -ForegroundColor White
+Write-Host "    3. 「$btnName」を押し、開いた「dist」フォルダーを選択" -ForegroundColor White
+Write-Host "       ※開いたエクスプローラーから「dist」フォルダをブラウザ画面に" -ForegroundColor Gray
+Write-Host "         直接ドラッグ＆ドロップするだけでも読み込めます！" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  手順B (マウス操作のみ):" -ForegroundColor Yellow
+Write-Host "    1. ブラウザ右上の「…」（メニュー）をクリック" -ForegroundColor White
+Write-Host "    2. 「拡張機能」 → 「拡張機能の管理」をクリック" -ForegroundColor White
+Write-Host "    3. 「開発者モード」を ON にして「$btnName」から「dist」を選択" -ForegroundColor White
 Write-Host ""
 Write-Host "  ★ 読み込み後、ブラウザ右上のパズルピースアイコンから" -ForegroundColor White
 Write-Host "     「Web Image Collector」をピン留めすると常時使えます！" -ForegroundColor Green
