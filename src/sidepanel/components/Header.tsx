@@ -28,6 +28,7 @@ export const Header: React.FC<HeaderProps> = ({
         position: 'sticky',
         top: 0,
         zIndex: 10,
+        boxSizing: 'border-box',
       }}
     >
       <div style={{ overflow: 'hidden', marginRight: 8 }}>

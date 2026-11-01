@@ -68,8 +68,10 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
       style={{
         flex: 1,
         overflowY: 'auto',
-        padding: 10,
+        overflowX: 'hidden',
+        padding: '8px 6px 8px 8px',
         position: 'relative',
+        boxSizing: 'border-box',
       }}
     >
       <div
@@ -77,6 +79,7 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
           height: `${virtualizer.getTotalSize()}px`,
           width: '100%',
           position: 'relative',
+          boxSizing: 'border-box',
         }}
       >
         {virtualizer.getVirtualItems().map((virtualRow) => {

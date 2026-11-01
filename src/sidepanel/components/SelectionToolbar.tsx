@@ -20,14 +20,16 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   return (
     <div
       style={{
-        padding: '8px 14px',
+        padding: '8px 10px',
         backgroundColor: '#ffffff',
         borderBottom: '1px solid #e5e7eb',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: 8,
-        fontSize: 12,
+        gap: 6,
+        fontSize: 11,
+        boxSizing: 'border-box',
+        flexWrap: 'wrap',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
