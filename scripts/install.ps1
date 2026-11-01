@@ -1,4 +1,4 @@
-$OutputEncoding = [System.Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+﻿$OutputEncoding = [System.Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $Host.UI.RawUI.WindowTitle = "HoiHoi - インストール案内"
 
 Write-Host ""
