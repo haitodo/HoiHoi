@@ -20,6 +20,23 @@ export interface ChunkRunnerController {
   destroy(): void;
 }
 
+// Highly selective query to avoid running expensive getComputedStyle on thousands of plain elements
+const IMAGE_TARGET_SELECTOR = [
+  'img',
+  'picture',
+  'source',
+  'svg image',
+  '[data-src]',
+  '[data-original]',
+  '[data-lazy-src]',
+  '[data-lazy]',
+  '[data-url]',
+  '[data-hi-res-src]',
+  '[data-srcset]',
+  '[style*="background"]',
+  '[style*="url("]',
+].join(', ');
+
 export function createChunkRunner(options: {
   largeDataUrlStore: Map<string, string>;
 }): ChunkRunnerController {
@@ -43,6 +60,7 @@ export function createChunkRunner(options: {
   // Batch buffer for candidate groups
   let batchBuffer: RawCandidateGroup[] = [];
   let batchFlushTimer: number | null = null;
+  let totalCandidatesSent = 0;
 
   function flushBatch() {
     if (batchFlushTimer !== null) {
@@ -54,6 +72,7 @@ export function createChunkRunner(options: {
 
     const groupsToSend = batchBuffer;
     batchBuffer = [];
+    totalCandidatesSent += groupsToSend.length;
 
     const message: ContentToBackgroundMessage = {
       channel: 'WIC_CONTENT_TO_BG',
@@ -63,14 +82,17 @@ export function createChunkRunner(options: {
       groups: groupsToSend,
     };
 
-    chrome.runtime.sendMessage(message).catch(() => {
-      // Background SW may be momentarily sleeping or restarting
+    chrome.runtime.sendMessage(message).catch((err) => {
+      console.warn('[WIC Content] Failed to send scan batch:', err);
     });
   }
 
   function enqueueGroup(group: RawCandidateGroup) {
     batchBuffer.push(group);
-    if (batchBuffer.length >= SCAN_BATCH_MAX_SIZE) {
+    // Flush immediately on very first discovery so UI renders right away
+    if (totalCandidatesSent === 0 && batchBuffer.length >= 5) {
+      flushBatch();
+    } else if (batchBuffer.length >= SCAN_BATCH_MAX_SIZE) {
       flushBatch();
     } else if (batchFlushTimer === null) {
       batchFlushTimer = window.setTimeout(flushBatch, SCAN_BATCH_INTERVAL_MS);
@@ -79,6 +101,7 @@ export function createChunkRunner(options: {
 
   // Active queue of elements pending inspection
   let pendingElements: Element[] = [];
+  let pendingIndex = 0; // O(1) pointer instead of O(N) array.shift()
   let isSliceRunning = false;
   let sliceTimer: number | null = null;
 
@@ -112,13 +135,13 @@ export function createChunkRunner(options: {
 
     const sliceStart = performance.now();
 
-    while (pendingElements.length > 0) {
-      const el = pendingElements.shift();
+    while (pendingIndex < pendingElements.length) {
+      const el = pendingElements[pendingIndex++];
       if (el) {
         processElement(el);
       }
 
-      // Check time slice budget
+      // Check time slice budget (8ms)
       if (performance.now() - sliceStart >= SCAN_CHUNK_BUDGET_MS) {
         sliceTimer = window.setTimeout(runNextSlice, 0);
         return;
@@ -127,7 +150,11 @@ export function createChunkRunner(options: {
 
     // Slice queue emptied
     isSliceRunning = false;
+    pendingElements = [];
+    pendingIndex = 0;
     flushBatch();
+
+    console.log(`[WIC Content] Scan complete for epoch ${currentScanEpoch}. Total candidates: ${totalCandidatesSent}`);
 
     // Notify background SW that initial traversal for current scanEpoch is done
     const statusMsg: ContentToBackgroundMessage = {
@@ -159,8 +186,10 @@ export function createChunkRunner(options: {
         for (let i = 0; i < mut.addedNodes.length; i++) {
           const node = mut.addedNodes[i];
           if (node instanceof Element) {
-            mutatedElements.add(node);
-            const descendants = node.querySelectorAll('*');
+            if (node.matches(IMAGE_TARGET_SELECTOR)) {
+              mutatedElements.add(node);
+            }
+            const descendants = node.querySelectorAll(IMAGE_TARGET_SELECTOR);
             for (let j = 0; j < descendants.length; j++) {
               mutatedElements.add(descendants[j]!);
             }
@@ -218,6 +247,7 @@ export function createChunkRunner(options: {
   return {
     startOrRescan(scanEpoch: number) {
       currentScanEpoch = scanEpoch;
+      totalCandidatesSent = 0;
       // Abort any in-progress slices and clear buffers
       if (sliceTimer !== null) {
         clearTimeout(sliceTimer);
@@ -225,6 +255,7 @@ export function createChunkRunner(options: {
       }
       isSliceRunning = false;
       pendingElements = [];
+      pendingIndex = 0;
       batchBuffer = [];
 
       // Notify scan in progress
@@ -237,9 +268,10 @@ export function createChunkRunner(options: {
       };
       chrome.runtime.sendMessage(statusMsg).catch(() => {});
 
-      // Collect initial DOM snapshot
-      const allElements = Array.from(document.querySelectorAll('*'));
-      scheduleElements(allElements);
+      // Targeted fast query for image elements
+      const directTargets = Array.from(document.querySelectorAll(IMAGE_TARGET_SELECTOR));
+      console.log(`[WIC Content] Starting scan for epoch ${scanEpoch}. Found ${directTargets.length} potential image elements.`);
+      scheduleElements(directTargets);
     },
     destroy() {
       if (sliceTimer !== null) clearTimeout(sliceTimer);

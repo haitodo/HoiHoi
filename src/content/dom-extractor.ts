@@ -24,10 +24,14 @@ export interface ExtractorContext {
   domOrderCounter: () => number;
 }
 
-/**
- * Handles huge `data:` URLs (e.g. multi-megabyte inline PNGs) to keep Background SW
- * session storage far away from the hard 10MB `QUOTA_BYTES` limit (`design.md` §7.2).
- */
+/** Detects common 1x1 transparent GIFs or empty SVG placeholders used by lazy loaders */
+function isPlaceholderUrl(url: string): boolean {
+  if (url.startsWith('data:image/gif;base64,R0lGODlhAQAB')) return true;
+  if (url.startsWith('data:image/svg+xml') && url.length < 150) return true;
+  if (url === 'about:blank') return true;
+  return false;
+}
+
 function normalizeAndRegisterCandidate(
   url: string,
   role: VariantRole,
@@ -41,10 +45,8 @@ function normalizeAndRegisterCandidate(
   let largeDataRefId: string | undefined;
 
   if (url.startsWith('data:') && url.length > INLINE_DATA_URL_SESSION_MAX_CHARS) {
-    // Generate a deterministic reference id based on length and timestamp
     largeDataRefId = `data_ref_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     ctx.largeDataUrlStore.set(largeDataRefId, url);
-    // Keep only the first 256 chars (MIME header preview) in `url` so it remains human-readable
     storedUrl = `${url.slice(0, 256)}...[large-data-url-truncated]`;
   }
 
@@ -79,12 +81,11 @@ export function extractFromImageElement(
   const variants: RawVariantCandidate[] = [];
   const addedUrls = new Set<string>();
 
-  // Determine img element natural dimensions if loaded
   const isLoaded = img.complete && img.naturalWidth > 0 && img.naturalHeight > 0;
   const imgNaturalWidth = isLoaded ? img.naturalWidth : null;
   const imgNaturalHeight = isLoaded ? img.naturalHeight : null;
 
-  // 1. Check currentSrc (browser's active display choice)
+  // 1. Check currentSrc
   let currentSrcUrl: string | null = null;
   if (img.currentSrc) {
     currentSrcUrl = resolveAndValidateImageUrl(img.currentSrc, baseUri);
@@ -97,8 +98,8 @@ export function extractFromImageElement(
     directSrcUrl = resolveAndValidateImageUrl(rawSrc, baseUri);
   }
 
-  // 3. Register primary and direct src variants
-  if (currentSrcUrl) {
+  // 3. Register primary and direct src variants (skip placeholder data URLs if possible)
+  if (currentSrcUrl && !isPlaceholderUrl(currentSrcUrl)) {
     variants.push(
       normalizeAndRegisterCandidate(
         currentSrcUrl,
@@ -113,8 +114,7 @@ export function extractFromImageElement(
     addedUrls.add(currentSrcUrl);
   }
 
-  if (directSrcUrl && !addedUrls.has(directSrcUrl)) {
-    // If directSrc is different from currentSrc, its natural dimensions are not yet verified
+  if (directSrcUrl && !addedUrls.has(directSrcUrl) && !isPlaceholderUrl(directSrcUrl)) {
     const isDirectActive = currentSrcUrl === directSrcUrl;
     variants.push(
       normalizeAndRegisterCandidate(
@@ -130,24 +130,28 @@ export function extractFromImageElement(
     addedUrls.add(directSrcUrl);
   }
 
-  // 4. Check lazy loading single-URL attributes on img
+  // 4. Check lazy loading single-URL attributes on img (e.g. data-src, data-original)
+  let primaryLazyUrl: string | null = null;
   for (const attr of LAZY_SRC_ATTR_ALLOWLIST) {
     const val = img.getAttribute(attr);
     if (val) {
       const resolved = resolveAndValidateImageUrl(val, baseUri);
-      if (resolved && !addedUrls.has(resolved)) {
-        variants.push(
-          normalizeAndRegisterCandidate(
-            resolved,
-            'lazy-attr',
-            'lazy-attr',
-            null,
-            null,
-            undefined,
-            ctx,
-          ),
-        );
-        addedUrls.add(resolved);
+      if (resolved && !isPlaceholderUrl(resolved)) {
+        if (!primaryLazyUrl) primaryLazyUrl = resolved;
+        if (!addedUrls.has(resolved)) {
+          variants.push(
+            normalizeAndRegisterCandidate(
+              resolved,
+              'lazy-attr',
+              'lazy-attr',
+              null,
+              null,
+              undefined,
+              ctx,
+            ),
+          );
+          addedUrls.add(resolved);
+        }
       }
     }
   }
@@ -157,7 +161,7 @@ export function extractFromImageElement(
   if (rawSrcset) {
     const parsed = parseSrcset(rawSrcset, baseUri);
     for (const item of parsed) {
-      if (!addedUrls.has(item.url)) {
+      if (!addedUrls.has(item.url) && !isPlaceholderUrl(item.url)) {
         const isCurrent = item.url === currentSrcUrl;
         variants.push(
           normalizeAndRegisterCandidate(
@@ -181,7 +185,7 @@ export function extractFromImageElement(
     if (val) {
       const parsed = parseSrcset(val, baseUri);
       for (const item of parsed) {
-        if (!addedUrls.has(item.url)) {
+        if (!addedUrls.has(item.url) && !isPlaceholderUrl(item.url)) {
           variants.push(
             normalizeAndRegisterCandidate(
               item.url,
@@ -208,7 +212,7 @@ export function extractFromImageElement(
       if (srcAttr) {
         const parsed = parseSrcset(srcAttr, baseUri);
         for (const item of parsed) {
-          if (!addedUrls.has(item.url)) {
+          if (!addedUrls.has(item.url) && !isPlaceholderUrl(item.url)) {
             const isCurrent = item.url === currentSrcUrl;
             variants.push(
               normalizeAndRegisterCandidate(
@@ -222,30 +226,6 @@ export function extractFromImageElement(
               ),
             );
             addedUrls.add(item.url);
-          }
-        }
-      }
-
-      // Check lazy srcset on source
-      for (const attr of LAZY_SRCSET_ATTR_ALLOWLIST) {
-        const lazySrcset = source.getAttribute(attr);
-        if (lazySrcset) {
-          const parsed = parseSrcset(lazySrcset, baseUri);
-          for (const item of parsed) {
-            if (!addedUrls.has(item.url)) {
-              variants.push(
-                normalizeAndRegisterCandidate(
-                  item.url,
-                  'picture-source',
-                  'lazy-attr',
-                  null,
-                  null,
-                  item.descriptor,
-                  ctx,
-                ),
-              );
-              addedUrls.add(item.url);
-            }
           }
         }
       }
@@ -275,11 +255,35 @@ export function extractFromImageElement(
     }
   }
 
+  // Fallback: If all candidates were placeholders, allow directSrcUrl as last resort
+  if (variants.length === 0) {
+    const fallback = directSrcUrl || currentSrcUrl;
+    if (fallback) {
+      variants.push(
+        normalizeAndRegisterCandidate(
+          fallback,
+          'src',
+          'img',
+          imgNaturalWidth,
+          imgNaturalHeight,
+          undefined,
+          ctx,
+        ),
+      );
+    }
+  }
+
   if (variants.length === 0) return null;
 
-  // Primary URL selection priority per design.md §5.2:
-  // 1. currentSrc -> 2. directSrc -> 3. first variant
-  const primaryUrl = currentSrcUrl || directSrcUrl || variants[0]!.url;
+  // Primary URL selection priority:
+  // If currentSrc is valid and non-placeholder -> currentSrcUrl
+  // Else if lazy data-src exists -> primaryLazyUrl
+  // Else directSrcUrl -> first variant
+  let primaryUrl = currentSrcUrl && !isPlaceholderUrl(currentSrcUrl) ? currentSrcUrl : null;
+  if (!primaryUrl && primaryLazyUrl) primaryUrl = primaryLazyUrl;
+  if (!primaryUrl && directSrcUrl && !isPlaceholderUrl(directSrcUrl)) primaryUrl = directSrcUrl;
+  if (!primaryUrl) primaryUrl = variants[0]!.url;
+
   const elKey = getElementKey(img, ctx);
 
   return {
@@ -297,17 +301,19 @@ export function extractFromCssBackground(
   el: Element,
   ctx: ExtractorContext,
 ): RawCandidateGroup[] {
-  // Avoid computing style on img or picture elements (redundant)
   const tag = el.tagName.toLowerCase();
   if (tag === 'img' || tag === 'picture' || tag === 'source' || tag === 'script' || tag === 'style') {
     return [];
   }
 
-  let bgVal = '';
-  try {
-    bgVal = window.getComputedStyle(el).backgroundImage;
-  } catch {
-    return [];
+  // Quick check inline style first for speed
+  let bgVal = (el as HTMLElement).style?.backgroundImage;
+  if (!bgVal || bgVal === 'none') {
+    try {
+      bgVal = window.getComputedStyle(el).backgroundImage;
+    } catch {
+      return [];
+    }
   }
 
   if (!bgVal || bgVal === 'none') return [];
@@ -319,6 +325,7 @@ export function extractFromCssBackground(
   const groups: RawCandidateGroup[] = [];
 
   for (const url of urls) {
+    if (isPlaceholderUrl(url)) continue;
     const candidate = normalizeAndRegisterCandidate(
       url,
       'standalone',
@@ -354,7 +361,7 @@ export function extractFromSvgImage(
   if (!rawHref) return null;
 
   const resolved = resolveAndValidateImageUrl(rawHref, ctx.baseUri);
-  if (!resolved) return null;
+  if (!resolved || isPlaceholderUrl(resolved)) return null;
 
   const candidate = normalizeAndRegisterCandidate(
     resolved,
@@ -389,7 +396,7 @@ export function extractFromLazyAttributes(
     const val = el.getAttribute(attr);
     if (val) {
       const resolved = resolveAndValidateImageUrl(val, ctx.baseUri);
-      if (resolved) {
+      if (resolved && !isPlaceholderUrl(resolved)) {
         const candidate = normalizeAndRegisterCandidate(
           resolved,
           'lazy-attr',
