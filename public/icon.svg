@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#4338ca"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <!-- Background Rounded Rect -->
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  
+  <!-- Image Card Outline -->
+  <rect x="22" y="24" width="84" height="64" rx="10" fill="#ffffff" opacity="0.95"/>
+  
+  <!-- Sun -->
+  <circle cx="44" cy="44" r="9" fill="url(#sun)"/>
+  
+  <!-- Mountains -->
+  <path d="M26 80 L52 50 L68 66 L82 48 L102 80 Z" fill="#4f46e5" opacity="0.85"/>
+  <path d="M48 80 L68 56 L88 80 Z" fill="#818cf8" opacity="0.7"/>
+
+  <!-- Collector Arrow (Download badge) -->
+  <circle cx="94" cy="94" r="22" fill="#10b981"/>
+  <path d="M94 82 L94 100 M86 93 L94 101 L102 93" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

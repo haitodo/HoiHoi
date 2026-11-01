@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build && vite build --config vite.content.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "install:guide": "cmd /c install.bat"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.6",
