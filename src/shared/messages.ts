@@ -74,6 +74,10 @@ export type BackgroundToContentMessage =
       channel: 'WIC_BG_TO_CONTENT';
       type: 'BG_RESOLVE_LARGE_DATA_URL';
       largeDataRefId: string;
+    }
+  | {
+      channel: 'WIC_BG_TO_CONTENT';
+      type: 'BG_STOP_SCANNER';
     };
 
 export interface ContentPingResponse {

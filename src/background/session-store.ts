@@ -575,6 +575,10 @@ export class SessionStore {
     });
   }
 
+  getAllTrackedTabIds(): number[] {
+    return Array.from(this.sessions.keys());
+  }
+
   removeTab(tabId: number): void {
     this.sessions.delete(tabId);
     chrome.storage.session

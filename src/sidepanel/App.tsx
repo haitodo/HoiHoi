@@ -73,6 +73,27 @@ export function App() {
     retryFailedDownloads,
   } = useTabSession(activeTabId);
 
+  // Maintain long-lived connection with Background SW while Side Panel is open.
+  // When Side Panel is closed, Background SW detects disconnection and terminates observers.
+  useEffect(() => {
+    let port: chrome.runtime.Port | null = null;
+    try {
+      port = chrome.runtime.connect({ name: 'hoihoi-sidepanel' });
+    } catch {}
+    return () => {
+      try {
+        port?.disconnect();
+      } catch {}
+    };
+  }, []);
+
+  // Automatically trigger scan when Side Panel opens on an unscanned tab
+  useEffect(() => {
+    if (activeTabId && snapshot && snapshot.scanStatus === 'unscanned') {
+      void triggerRescan();
+    }
+  }, [activeTabId, snapshot?.scanStatus, triggerRescan]);
+
   const [filter, setFilterState] = useState<FilterState>(() => {
     const saved = loadSavedFilterPreferences();
     return {

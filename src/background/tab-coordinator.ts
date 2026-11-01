@@ -159,6 +159,22 @@ export function handleTabNavigation(tabId: number): void {
   }, 500);
 }
 
+export async function stopTabScanner(tabId: number): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      channel: 'WIC_BG_TO_CONTENT',
+      type: 'BG_STOP_SCANNER',
+    });
+  } catch {
+    // Tab might be closed or script not present; ignore cleanly
+  }
+}
+
+export async function stopAllScanners(): Promise<void> {
+  const tabIds = sessionStore.getAllTrackedTabIds();
+  await Promise.allSettled(tabIds.map((id) => stopTabScanner(id)));
+}
+
 export function isScannableUrl(url: string): boolean {
   if (!url) return false;
   try {

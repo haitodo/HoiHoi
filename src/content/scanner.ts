@@ -90,6 +90,12 @@ function createScannerController(): WicScannerController {
         }
         return false;
       }
+
+      case 'BG_STOP_SCANNER': {
+        chunkRunner.destroy();
+        sendResponse({ ok: true });
+        return false;
+      }
     }
   });
 

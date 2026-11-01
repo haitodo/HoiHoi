@@ -116,10 +116,40 @@ export function createChunkRunner(options: {
   let batchBuffer: RawCandidateGroup[] = [];
   let batchFlushTimer: number | null = null;
   let totalCandidatesSent = 0;
+  let isObserving = false;
+
+  function stopObserving() {
+    if (!isObserving) return;
+    try {
+      observer.disconnect();
+    } catch {}
+    try {
+      window.removeEventListener('load', onCaptureLoad, true);
+    } catch {}
+    isObserving = false;
+  }
+
+  function ensureObserving() {
+    if (isObserving || isDestroyed || !isExtensionContextValid()) return;
+    try {
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: OBSERVED_MUTATION_ATTRIBUTES as string[],
+      });
+      window.addEventListener('load', onCaptureLoad, true);
+      isObserving = true;
+    } catch (err) {
+      console.warn('[WIC Content] Failed to start DOM observer:', err);
+    }
+  }
 
   function destroy() {
     if (isDestroyed) return;
     isDestroyed = true;
+
+    stopObserving();
 
     if (sliceTimer !== null) {
       clearTimeout(sliceTimer);
@@ -133,14 +163,6 @@ export function createChunkRunner(options: {
       clearTimeout(mutationDebounceTimer);
       mutationDebounceTimer = null;
     }
-
-    try {
-      observer.disconnect();
-    } catch {}
-
-    try {
-      window.removeEventListener('load', onCaptureLoad, true);
-    } catch {}
 
     pendingElements = [];
     batchBuffer = [];
@@ -329,13 +351,6 @@ export function createChunkRunner(options: {
     }, MUTATION_DEBOUNCE_MS);
   });
 
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: OBSERVED_MUTATION_ATTRIBUTES as string[],
-  });
-
   // Track late image loads via capture phase load listener
   const onCaptureLoad = (e: Event) => {
     if (isDestroyed || !isExtensionContextValid()) {
@@ -361,14 +376,17 @@ export function createChunkRunner(options: {
       }
     }
   };
-  window.addEventListener('load', onCaptureLoad, true);
 
   return {
     startOrRescan(scanEpoch: number) {
-      if (isDestroyed || !isExtensionContextValid()) {
+      if (!isExtensionContextValid()) {
         destroy();
         return;
       }
+
+      // Resume from destroyed state if requested
+      isDestroyed = false;
+      ensureObserving();
 
       currentScanEpoch = scanEpoch;
       totalCandidatesSent = 0;

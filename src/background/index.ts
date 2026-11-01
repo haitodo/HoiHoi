@@ -8,6 +8,7 @@ import { sessionStore } from './session-store';
 import {
   bootstrapTabScan,
   handleTabNavigation,
+  stopAllScanners,
   triggerTabRescan,
 } from './tab-coordinator';
 
@@ -45,6 +46,16 @@ chrome.action.onClicked.addListener((tab) => {
       })
       .catch(() => {});
   } catch {}
+});
+
+// Connect port listener to track Side Panel lifecycle
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'hoihoi-sidepanel') {
+    port.onDisconnect.addListener(() => {
+      // Side Panel closed -> stop observers across tracked tabs to eliminate idle load
+      void stopAllScanners();
+    });
+  }
 });
 
 // Broadcast session events to any open extension views (Side Panel)
