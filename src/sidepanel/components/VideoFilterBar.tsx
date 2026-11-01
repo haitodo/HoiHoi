@@ -14,6 +14,11 @@ interface VideoFilterBarProps {
   onSortChange: (order: VideoSortOrder) => void;
   onReset?: () => void;
   unknownMetadataCount: number;
+  unprobedCount?: number;
+  isProbing?: boolean;
+  probeProgress?: { current: number; total: number } | null;
+  onStartProbing?: () => void;
+  onStopProbing?: () => void;
 }
 
 const AVAILABLE_VIDEO_FORMATS: Array<{ label: string; value: VideoFormat }> = [
@@ -32,6 +37,11 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
   onSortChange,
   onReset,
   unknownMetadataCount,
+  unprobedCount = 0,
+  isProbing = false,
+  probeProgress,
+  onStartProbing,
+  onStopProbing,
 }) => {
   const toggleFormat = (fmt: VideoFormat) => {
     const isSelected = filter.formats.includes(fmt);
@@ -258,6 +268,82 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
           )}
         </div>
       </div>
+
+      {/* Probe controls & progress bar */}
+      {isProbing && (
+        <div
+          style={{
+            fontSize: 11,
+            padding: '5px 8px',
+            borderRadius: 5,
+            backgroundColor: 'var(--color-primary-subtle)',
+            border: '1px solid var(--color-primary-subtle-border)',
+            color: 'var(--color-primary-text)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 6,
+          }}
+        >
+          <span style={{ fontWeight: 500 }}>
+            ⏳ 画質・長さを計測中... ({probeProgress?.current ?? 0} / {probeProgress?.total ?? 0})
+          </span>
+          {onStopProbing && (
+            <button
+              type="button"
+              onClick={onStopProbing}
+              style={{
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 4,
+                border: '1px solid var(--color-border)',
+                backgroundColor: 'var(--color-bg-surface)',
+                color: 'var(--color-text-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              ✕ 中止
+            </button>
+          )}
+        </div>
+      )}
+
+      {!isProbing && unprobedCount > 0 && onStartProbing && (
+        <div
+          style={{
+            fontSize: 11,
+            padding: '4px 8px',
+            borderRadius: 5,
+            backgroundColor: 'var(--color-bg-surface)',
+            border: '1px dashed var(--color-border-input)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 6,
+          }}
+        >
+          <span style={{ color: 'var(--color-text-secondary)' }}>
+            画質未取得の直接保存動画: {unprobedCount} 件
+          </span>
+          <button
+            type="button"
+            onClick={onStartProbing}
+            style={{
+              padding: '2px 8px',
+              fontSize: 11,
+              border: '1px solid var(--color-primary-subtle-border)',
+              borderRadius: 4,
+              backgroundColor: 'var(--color-primary-subtle)',
+              color: 'var(--color-primary-text)',
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+            title="動画全体をダウンロードせず、先頭メタデータのみを1件ずつ軽量に問い合わせて解像度を取得します"
+          >
+            🔍 画質を一括取得
+          </button>
+        </div>
+      )}
 
       {/* Unprobed metadata banner (Zero-Eager-Load transparency) */}
       {hasMetadataFilter && unknownMetadataCount > 0 && (

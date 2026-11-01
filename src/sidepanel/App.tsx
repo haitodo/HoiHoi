@@ -12,6 +12,7 @@ import type {
   VideoSortOrder,
 } from '@shared/types';
 import {
+  extractResolutionHint,
   formatByteSize,
   getActiveVideoVariant,
   matchesMinResolutionTier,
@@ -30,6 +31,7 @@ import { VideoLightboxModal } from './components/VideoLightboxModal';
 import { useActiveTabId } from './hooks/useActiveTabId';
 import { useBlobStreamBridge } from './hooks/useBlobStreamBridge';
 import { useTabSession } from './hooks/useTabSession';
+import { useVideoMetadataProber } from './hooks/useVideoMetadataProber';
 
 const DEFAULT_IMAGE_FILTER: FilterState = {
   urlQuery: '',
@@ -158,6 +160,17 @@ export function App() {
     saveCapturedFrame,
     retryFailedDownloads,
   } = useTabSession(activeTabId);
+
+  const {
+    isProbing: isVideoProbing,
+    progress: videoProbeProgress,
+    startProbing: startVideoProbing,
+    stopProbing: stopVideoProbing,
+    unprobedCount: unprobedVideoCount,
+  } = useVideoMetadataProber({
+    videos: snapshot?.videos ?? [],
+    onReportVideoMetadata: reportVideoMetadata,
+  });
 
   // Maintain long-lived connection with Background SW while Side Panel is open.
   useEffect(() => {
@@ -509,8 +522,19 @@ export function App() {
           return b.firstSeenOrder - a.firstSeenOrder;
         case 'resolution_desc':
         case 'resolution_asc': {
-          const aArea = aVar?.videoWidth && aVar?.videoHeight ? aVar.videoWidth * aVar.videoHeight : null;
-          const bArea = bVar?.videoWidth && bVar?.videoHeight ? bVar.videoWidth * bVar.videoHeight : null;
+          const getVideoArea = (vUrl: string, v?: typeof aVar) => {
+            if (v?.videoWidth && v?.videoHeight) return v.videoWidth * v.videoHeight;
+            for (const d of v?.descriptors ?? []) {
+              const hint = extractResolutionHint(d);
+              if (hint && hint.area > 0) return hint.area;
+            }
+            const urlHint = extractResolutionHint(vUrl);
+            if (urlHint && urlHint.area > 0) return urlHint.area;
+            return null;
+          };
+
+          const aArea = getVideoArea(a.selectedUrl, aVar);
+          const bArea = getVideoArea(b.selectedUrl, bVar);
           if (aArea !== null && bArea !== null && aArea !== bArea) {
             return videoSortOrder === 'resolution_desc' ? bArea - aArea : aArea - bArea;
           }
@@ -758,6 +782,11 @@ export function App() {
                 onSortChange={handleVideoSortChange}
                 onReset={handleResetVideoFilter}
                 unknownMetadataCount={unknownVideoMetadataCount}
+                unprobedCount={unprobedVideoCount}
+                isProbing={isVideoProbing}
+                probeProgress={videoProbeProgress}
+                onStartProbing={() => void startVideoProbing()}
+                onStopProbing={stopVideoProbing}
               />
 
               <SelectionToolbar

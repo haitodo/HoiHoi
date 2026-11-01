@@ -12,6 +12,7 @@ import type {
 } from '@shared/types';
 import { resolveAndValidateImageUrl } from '@shared/url-utils';
 import {
+  extractResolutionHint,
   isKnownAdOrTrackerVideoUrl,
   isLikelyVideoUrl,
   isSegmentChunkNoiseUrl,
@@ -214,17 +215,25 @@ export function extractFromVideoElement(
     const valid = resolveAndValidateVideoUrl(rawUrl, baseUri);
     if (!valid || isSegmentChunkNoiseUrl(valid) || isKnownAdOrTrackerVideoUrl(valid)) return;
 
+    const resHint = extractResolutionHint(descriptor ? `${descriptor} ${valid}` : valid);
+    const effectiveDescriptor = descriptor || resHint?.descriptor;
+    const effectiveWidth = matchLoadedDims && videoWidth ? videoWidth : (resHint?.width ?? null);
+    const effectiveHeight = matchLoadedDims && videoHeight ? videoHeight : (resHint?.height ?? null);
+
     const existing = variantByOriginalUrl.get(valid);
     if (existing) {
       if (mimeHint && !existing.mimeHint) {
         existing.mimeHint = mimeHint;
       }
-      if (descriptor && !existing.descriptor) {
-        existing.descriptor = descriptor;
+      if (effectiveDescriptor && !existing.descriptor) {
+        existing.descriptor = effectiveDescriptor;
       }
       if (matchLoadedDims) {
         if (videoWidth && !existing.videoWidth) existing.videoWidth = videoWidth;
         if (videoHeight && !existing.videoHeight) existing.videoHeight = videoHeight;
+      } else if (effectiveWidth && effectiveHeight && !existing.videoWidth && !existing.videoHeight) {
+        existing.videoWidth = effectiveWidth;
+        existing.videoHeight = effectiveHeight;
       }
       return;
     }
@@ -233,11 +242,11 @@ export function extractFromVideoElement(
       valid,
       role,
       source,
-      matchLoadedDims ? videoWidth : null,
-      matchLoadedDims ? videoHeight : null,
+      effectiveWidth,
+      effectiveHeight,
       ctx,
       {
-        descriptor,
+        descriptor: effectiveDescriptor,
         mimeHint,
         isDrmProtected: isDrm,
       },
@@ -374,6 +383,17 @@ export function extractFromVideoLinkOrLazyElement(
       }
     }
 
+    // Extract resolution hint from link text, title, aria-label, or resolved URL
+    const textContext = [
+      el.textContent,
+      el.getAttribute('title'),
+      el.getAttribute('aria-label'),
+      resolved,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const resHint = extractResolutionHint(textContext);
+
     return {
       occurrenceKey: `el_${elId}::video-link::${resolved}`,
       primaryUrl: resolved,
@@ -381,9 +401,18 @@ export function extractFromVideoLinkOrLazyElement(
       durationSec: null,
       posterUrl,
       variants: [
-        registerVideoVariant(resolved, 'link-target', 'link-href', null, null, ctx, {
-          mimeHint: typeHint,
-        }),
+        registerVideoVariant(
+          resolved,
+          'link-target',
+          'link-href',
+          resHint?.width ?? null,
+          resHint?.height ?? null,
+          ctx,
+          {
+            descriptor: resHint?.descriptor,
+            mimeHint: typeHint,
+          },
+        ),
       ],
     };
   }
@@ -642,9 +671,18 @@ export function extractEmbeddedScriptAndConfigVideos(
     });
     if (uniqueElUrls.length > 0) {
       const elId = getOrAssignElementId(el, ctx);
-      const variants = uniqueElUrls.map((u) =>
-        registerVideoVariant(u, 'metadata', 'script-embed', null, null, ctx),
-      );
+      const variants = uniqueElUrls.map((u) => {
+        const hint = extractResolutionHint(u);
+        return registerVideoVariant(
+          u,
+          'metadata',
+          'script-embed',
+          hint?.width ?? null,
+          hint?.height ?? null,
+          ctx,
+          { descriptor: hint?.descriptor },
+        );
+      });
       groups.push({
         occurrenceKey: `el_${elId}::config-embed::${variants[0]!.url}`,
         primaryUrl: variants[0]!.url,
@@ -656,29 +694,56 @@ export function extractEmbeddedScriptAndConfigVideos(
   }
 
   // 2. Inline <script> blocks (skipping external scripts and already-parsed JSON-LD)
+  // Group URLs discovered in the SAME <script> block into a single VideoGroup so multi-quality
+  // player configurations (e.g. 1080p, 720p, 480p) form variants of ONE card rather than separate duplicate cards.
   const inlineScripts = doc.querySelectorAll('script:not([src])');
-  const scriptUrls: string[] = [];
   for (let i = 0; i < inlineScripts.length; i++) {
-    if (scriptUrls.length >= MAX_SCRIPT_EXTRACTED_URLS) break;
     const scriptEl = inlineScripts[i]!;
     const scriptType = (scriptEl.getAttribute('type') || '').toLowerCase();
     if (scriptType === 'application/ld+json') continue;
     const content = scriptEl.textContent;
-    if (content) {
-      collectValidEmbeddedVideoUrls(content, baseUri, scriptUrls);
-    }
-  }
+    if (!content) continue;
 
-  for (const url of scriptUrls) {
-    if (seenUrls.has(url)) continue;
-    seenUrls.add(url);
+    const blockUrls: string[] = [];
+    collectValidEmbeddedVideoUrls(content, baseUri, blockUrls);
+    const newUrls = blockUrls.filter((u) => {
+      if (seenUrls.has(u)) return false;
+      seenUrls.add(u);
+      return true;
+    });
+
+    if (newUrls.length === 0) continue;
+
+    const scriptElId = getOrAssignElementId(scriptEl, ctx);
+    const variants = newUrls.map((url) => {
+      // Find surrounding text context around this URL in script content for quality labels (e.g. "label": "1080p")
+      let labelContext = url;
+      const idx = content.indexOf(url);
+      if (idx !== -1) {
+        const start = Math.max(0, idx - 120);
+        const end = Math.min(content.length, idx + url.length + 120);
+        labelContext = content.slice(start, end);
+      }
+      const hint = extractResolutionHint(labelContext) ?? extractResolutionHint(url);
+      return registerVideoVariant(
+        url,
+        'metadata',
+        'script-embed',
+        hint?.width ?? null,
+        hint?.height ?? null,
+        ctx,
+        { descriptor: hint?.descriptor },
+      );
+    });
+
+    const primaryUrl = variants[0]!.url;
     groups.push({
-      occurrenceKey: `script::embed::${url}`,
-      primaryUrl: url,
+      occurrenceKey: `script_${scriptElId}::embed::${primaryUrl}`,
+      primaryUrl,
       domOrder: ctx.domOrderCounter(),
-      durationSec: scriptUrls.length === 1 ? (pageFallbackMeta?.durationSec ?? null) : null,
-      posterUrl: scriptUrls.length === 1 ? pageFallbackMeta?.posterUrl : undefined,
-      variants: [registerVideoVariant(url, 'metadata', 'script-embed', null, null, ctx)],
+      durationSec: newUrls.length === 1 ? (pageFallbackMeta?.durationSec ?? null) : null,
+      posterUrl: newUrls.length === 1 ? pageFallbackMeta?.posterUrl : undefined,
+      variants,
     });
   }
 

@@ -22,6 +22,7 @@ import {
   classifyVideoDeliveryAndReadiness,
   getActiveVideoVariant,
   inferVideoFormat,
+  normalizeVideoUrlStem,
   parseHlsMasterPlaylist,
   pickBestVideoVariantUrl,
 } from '@shared/video-utils';
@@ -495,6 +496,21 @@ export class SessionStore {
       }
 
       if (!video) {
+        // Pattern 1: Check if candidate shares a normalized URL stem with an existing VideoItem
+        // e.g. sample_1080p.mp4 and sample_720p.mp4 share the stem sample.mp4
+        const candidateStem = normalizeVideoUrlStem(group.primaryUrl);
+        if (candidateStem !== group.primaryUrl) {
+          for (const existingVideo of session.videos) {
+            const existingStem = normalizeVideoUrlStem(existingVideo.primaryUrl);
+            if (existingStem === candidateStem) {
+              video = existingVideo;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!video) {
         if (session.videos.length >= MAX_VIDEOS_PER_TAB) {
           break;
         }
@@ -825,6 +841,20 @@ export class SessionStore {
           matchedVideo = candidate;
           sourceVariant = candidate.variants.find((v) => v.url === hopUrl);
           break;
+        }
+      }
+
+      // Pattern 1 URL stem matching for network-detected videos
+      if (!matchedVideo) {
+        const candidateStem = normalizeVideoUrlStem(params.url);
+        if (candidateStem !== params.url) {
+          for (const existingVideo of session.videos) {
+            const existingStem = normalizeVideoUrlStem(existingVideo.primaryUrl);
+            if (existingStem === candidateStem) {
+              matchedVideo = existingVideo;
+              break;
+            }
+          }
         }
       }
     } else if (chainUrls.length > 0) {

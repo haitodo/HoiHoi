@@ -6,6 +6,7 @@ import {
 import {
   buildStreamCliCommand,
   classifyVideoDeliveryAndReadiness,
+  extractResolutionHint,
   formatByteSize,
   formatVideoDuration,
   getVideoResolutionTier,
@@ -13,6 +14,7 @@ import {
   isKnownAdOrTrackerVideoUrl,
   isLikelyVideoUrl,
   isSegmentChunkNoiseUrl,
+  normalizeVideoUrlStem,
   parseContentRangeTotalBytes,
   parseHlsMasterPlaylist,
   parseHlsMediaPlaylist,
@@ -283,6 +285,53 @@ describe('video-utils', () => {
       );
       expect(parsedEnc.isEncrypted).toBe(true);
       expect(parsedEnc.isLiveStream).toBe(true);
+    });
+  });
+
+  describe('extractResolutionHint & normalizeVideoUrlStem', () => {
+    it('accurately parses resolution hints from URLs, filenames, labels, and link texts', () => {
+      const h1080 = extractResolutionHint('https://cdn.example.com/videos/movie_1080p.mp4');
+      expect(h1080?.descriptor).toBe('1080p');
+      expect(h1080?.tier).toBe('1080p');
+      expect(h1080?.height).toBe(1080);
+      expect(h1080?.width).toBe(1920);
+
+      const h720 = extractResolutionHint('sample-720p.webm');
+      expect(h720?.descriptor).toBe('720p');
+      expect(h720?.tier).toBe('720p');
+
+      const h4k = extractResolutionHint('4k_nature_wallpaper.mp4');
+      expect(h4k?.descriptor).toBe('4K');
+      expect(h4k?.tier).toBe('4k');
+
+      const hDim = extractResolutionHint('stream_1920x1080.mp4');
+      expect(hDim?.descriptor).toBe('1080p');
+      expect(hDim?.tier).toBe('1080p');
+
+      const hLink = extractResolutionHint('Download Full HD (1080p)');
+      expect(hLink?.descriptor).toBe('1080p');
+
+      const hQuery = extractResolutionHint('https://example.com/play?res=1080');
+      expect(hQuery?.descriptor).toBe('1080p');
+    });
+
+    it('normalizes video URL stems by stripping resolution markers for pattern-1 grouping', () => {
+      const stem1 = normalizeVideoUrlStem('https://cdn.example.com/videos/sample_1080p.mp4');
+      const stem2 = normalizeVideoUrlStem('https://cdn.example.com/videos/sample_720p.mp4');
+      const stem3 = normalizeVideoUrlStem('https://cdn.example.com/videos/sample_480p.mp4');
+      expect(stem1).toBe('https://cdn.example.com/videos/sample.mp4');
+      expect(stem1).toBe(stem2);
+      expect(stem2).toBe(stem3);
+
+      const pathStem1 = normalizeVideoUrlStem('https://cdn.example.com/v/1080p/clip.mp4');
+      const pathStem2 = normalizeVideoUrlStem('https://cdn.example.com/v/720p/clip.mp4');
+      expect(pathStem1).toBe('https://cdn.example.com/v/__RES__/clip.mp4');
+      expect(pathStem1).toBe(pathStem2);
+
+      const queryStem1 = normalizeVideoUrlStem('https://cdn.example.com/video.mp4?res=1080');
+      const queryStem2 = normalizeVideoUrlStem('https://cdn.example.com/video.mp4?res=720');
+      expect(queryStem1).toBe('https://cdn.example.com/video.mp4');
+      expect(queryStem1).toBe(queryStem2);
     });
   });
 

@@ -3,10 +3,12 @@ import { extractFilenameForSort } from '@shared/filename-utils';
 import type { CardSize, ItemDownloadState, VideoItem } from '@shared/types';
 import {
   buildStreamCliCommand,
+  extractResolutionHint,
   formatByteSize,
   formatVideoDuration,
   getActiveVideoVariant,
   getVideoResolutionTier,
+  getVideoResolutionTierFromVariant,
 } from '@shared/video-utils';
 import type { HlsStreamMergeProgress } from '../utils/hls-saver';
 
@@ -73,21 +75,28 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   const canPreviewInline =
     readiness === 'ready' && !selectedUrl.startsWith('data:__WIC_LARGE');
 
-  const resTier = getVideoResolutionTier(
-    activeVariant?.videoWidth,
-    activeVariant?.videoHeight,
-  );
+  const resTier = getVideoResolutionTierFromVariant(activeVariant);
+  const detectedHint =
+    !activeVariant?.videoWidth || !activeVariant?.videoHeight
+      ? (activeVariant?.descriptors[0] ? extractResolutionHint(activeVariant.descriptors[0]) : null) ??
+        extractResolutionHint(selectedUrl)
+      : null;
+
   const resBadge =
     resTier !== 'unknown'
       ? resTier === '4k'
         ? '4K'
         : resTier.toUpperCase()
-      : activeVariant?.descriptors[0] || null;
+      : activeVariant?.descriptors[0] || (detectedHint ? detectedHint.descriptor : null);
 
   const dimsText =
     activeVariant?.videoWidth && activeVariant?.videoHeight
       ? `${activeVariant.videoWidth}×${activeVariant.videoHeight}`
-      : '画質未取得';
+      : activeVariant?.descriptors[0]
+        ? activeVariant.descriptors[0]
+        : detectedHint
+          ? `${detectedHint.descriptor} (推定)`
+          : '画質未取得';
 
   const formatText = (activeVariant?.format || 'unknown').toUpperCase();
   const sizeText = formatByteSize(activeVariant?.fileSizeBytes);
@@ -579,10 +588,11 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               title="保存・再生する動画候補を切り替え"
             >
               {item.variants.map((v, idx) => {
+                const vHint = !v.videoWidth || !v.videoHeight ? extractResolutionHint(v.url) : null;
                 const vDims =
                   v.videoWidth && v.videoHeight
                     ? `${v.videoWidth}×${v.videoHeight}`
-                    : v.descriptors.join(' ') || `候補 ${idx + 1}`;
+                    : v.descriptors.join(' ') || (vHint ? vHint.descriptor : `候補 ${idx + 1}`);
                 const vSize = formatByteSize(v.fileSizeBytes);
                 const vSizeSuffix = vSize ? ` (${vSize})` : '';
                 const vState = v.readiness === 'ready' ? '' : ' [ストリーム/制限]';

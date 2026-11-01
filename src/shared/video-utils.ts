@@ -491,6 +491,147 @@ export function formatByteSize(bytes: number | null | undefined): string {
   return `${bytes} B`;
 }
 
+export interface ResolutionHint {
+  width: number | null;
+  height: number | null;
+  area: number;
+  descriptor: string;
+  tier: Exclude<VideoResolutionTier, 'all'> | 'unknown';
+}
+
+/**
+ * Extracts resolution hint (dimensions, descriptor, tier) from a URL, filename, HTML label, or link text.
+ * Pure logic, zero network requests.
+ */
+export function extractResolutionHint(textOrUrl: string): ResolutionHint | null {
+  if (!textOrUrl) return null;
+  const raw = textOrUrl.trim();
+  if (!raw) return null;
+
+  // 1. Explicit Dimension pattern: 1920x1080, 1280×720, 3840*2160
+  const dimMatch = /(?:^|[._\-/= ?&])(\d{3,4})\s*[x×*]\s*(\d{3,4})(?:$|[._\-/= ?&#])/i.exec(raw);
+  if (dimMatch?.[1] && dimMatch?.[2]) {
+    const w = Number(dimMatch[1]);
+    const h = Number(dimMatch[2]);
+    if (w > 0 && h > 0) {
+      const tier = getVideoResolutionTier(w, h);
+      const desc = h >= 2160 ? '4K' : `${h}p`;
+      return { width: w, height: h, area: w * h, descriptor: desc, tier };
+    }
+  }
+
+  // 2. Standard Vertical P-pattern: 2160p, 1080p, 720p, 540p, 480p, 360p, 240p
+  const pMatch = /(?:^|[._\-/= ?&])(\d{3,4})p\b/i.exec(raw);
+  if (pMatch?.[1]) {
+    const h = Number(pMatch[1]);
+    if (h >= 120 && h <= 4320) {
+      const w = Math.round((h * 16) / 9);
+      const tier = getVideoResolutionTier(w, h);
+      const desc = h >= 2160 ? '4K' : `${h}p`;
+      return { width: w, height: h, area: w * h, descriptor: desc, tier };
+    }
+  }
+
+  // 3. Query params: res=1080, quality=720, height=1080
+  const queryMatch = /[?&](?:res|quality|height|resolution)=(\d{3,4})p?(?:&|$)/i.exec(raw);
+  if (queryMatch?.[1]) {
+    const h = Number(queryMatch[1]);
+    if (h >= 120 && h <= 4320) {
+      const w = Math.round((h * 16) / 9);
+      const tier = getVideoResolutionTier(w, h);
+      const desc = h >= 2160 ? '4K' : `${h}p`;
+      return { width: w, height: h, area: w * h, descriptor: desc, tier };
+    }
+  }
+
+  // 4. Named Tiers (4K, UHD, 2K, QHD, FHD, Full HD, HD, SD)
+  const lower = raw.toLowerCase();
+  if (/(?:^|[._\-/= ?&#])(?:4k|uhd)(?=[._\-/= ?&#]|$)/i.test(lower)) {
+    return { width: 3840, height: 2160, area: 3840 * 2160, descriptor: '4K', tier: '4k' };
+  }
+  if (/(?:^|[._\-/= ?&#])(?:2k|qhd|1440p?)(?=[._\-/= ?&#]|$)/i.test(lower)) {
+    return { width: 2560, height: 1440, area: 2560 * 1440, descriptor: '2K', tier: '1080p' };
+  }
+  if (/(?:^|[._\-/= ?&#])(?:fhd|full[\s_-]?hd)(?=[._\-/= ?&#]|$)/i.test(lower)) {
+    return { width: 1920, height: 1080, area: 1920 * 1080, descriptor: '1080p', tier: '1080p' };
+  }
+  if (/(?:^|[._\-/= ?&#])(?:hd|high[\s_-]?def|high[\s_-]?quality)(?=[._\-/= ?&#]|$)/i.test(lower)) {
+    return { width: 1280, height: 720, area: 1280 * 720, descriptor: '720p', tier: '720p' };
+  }
+  if (/(?:^|[._\-/= ?&#])(?:sd|standard[\s_-]?def)(?=[._\-/= ?&#]|$)/i.test(lower)) {
+    return { width: 640, height: 360, area: 640 * 360, descriptor: 'SD', tier: 'sd' };
+  }
+
+  // 5. Naked number in filename before extension: e.g. "video_1080.mp4" or "video-720.mp4" or "/1080/"
+  const numMatch = /(?:^|[._\-/= ?&])(2160|1440|1080|720|540|480|360|240)(?=[._\-/= ?&#]|$)/i.exec(raw);
+  if (numMatch?.[1]) {
+    const h = Number(numMatch[1]);
+    const w = Math.round((h * 16) / 9);
+    const tier = getVideoResolutionTier(w, h);
+    return { width: w, height: h, area: w * h, descriptor: `${h}p`, tier };
+  }
+
+  return null;
+}
+
+/**
+ * Normalizes a video URL by stripping resolution-specific markers (e.g. `_1080p`, `-720p`, `/1080/`, `?res=1080`)
+ * so that variants of the SAME video with different resolutions produce the exact same stem key.
+ * Used to group Pattern 1 URLs into a single VideoItem.
+ */
+export function normalizeVideoUrlStem(urlStr: string): string {
+  try {
+    const parsed = new URL(urlStr);
+
+    // Normalize path by replacing resolution directory /1080p/ or /720/ with /__RES__/
+    let pathname = parsed.pathname.replace(
+      /\/(?:2160p?|1440p?|1080p?|720p?|540p?|480p?|360p?|240p?|4k|uhd|fhd|hd|sd)\//gi,
+      '/__RES__/',
+    );
+
+    // Normalize filename by removing resolution suffix before file extension
+    // e.g. sample_1080p.mp4 -> sample.mp4, clip-720.webm -> clip.webm
+    pathname = pathname.replace(
+      /([._-])(?:2160p?|1440p?|1080p?|720p?|540p?|480p?|360p?|240p?|4k|uhd|fhd|hd|sd|\d{3,4}x\d{3,4})(?=[._-]|\.[a-z0-9]+$)/gi,
+      '',
+    );
+
+    // Remove resolution query parameters
+    const params = new URLSearchParams(parsed.search);
+    for (const key of Array.from(params.keys())) {
+      if (/^(?:res|quality|height|resolution|size)$/i.test(key)) {
+        params.delete(key);
+      }
+    }
+
+    const cleanSearch = params.toString() ? `?${params.toString()}` : '';
+    return `${parsed.protocol}//${parsed.host}${pathname}${cleanSearch}`;
+  } catch {
+    return urlStr;
+  }
+}
+
+export function getVideoResolutionTierFromVariant(variant?: {
+  videoWidth?: number | null;
+  videoHeight?: number | null;
+  descriptors?: string[];
+  url?: string;
+}): Exclude<VideoResolutionTier, 'all'> | 'unknown' {
+  if (!variant) return 'unknown';
+  if (variant.videoWidth && variant.videoHeight) {
+    return getVideoResolutionTier(variant.videoWidth, variant.videoHeight);
+  }
+  for (const d of variant.descriptors ?? []) {
+    const hint = extractResolutionHint(d);
+    if (hint && hint.tier !== 'unknown') return hint.tier;
+  }
+  if (variant.url) {
+    const hint = extractResolutionHint(variant.url);
+    if (hint && hint.tier !== 'unknown') return hint.tier;
+  }
+  return 'unknown';
+}
+
 /**
  * Selects the optimal high-quality downloadable variant for a `VideoItem`.
  * Priority:
@@ -515,18 +656,14 @@ export function pickBestVideoVariantUrl(
   if (variants.length === 1) return variants[0]!.url;
 
   const inferDescriptorArea = (rawDesc: string): number => {
+    const hint = extractResolutionHint(rawDesc);
+    if (hint && hint.area > 0) return hint.area;
     const clean = rawDesc.trim().toLowerCase();
     const pMatch = /(\d{3,4})p\b/i.exec(clean);
     if (pMatch?.[1]) {
       const h = Number(pMatch[1]);
       return Math.round((h * h * 16) / 9);
     }
-    if (/\b(?:4k|uhd)\b/.test(clean)) return 3840 * 2160;
-    if (/\b(?:2k|qhd)\b/.test(clean)) return 2560 * 1440;
-    if (/\b(?:fhd|full\s*hd)\b/.test(clean)) return 1920 * 1080;
-    if (/\b(?:hd|high|hq)\b/.test(clean)) return 1280 * 720;
-    if (/\b(?:sd|med|medium|standard)\b/.test(clean)) return 640 * 360;
-    if (/\b(?:ld|low|lq)\b/.test(clean)) return 426 * 240;
     return 0;
   };
 
@@ -542,7 +679,7 @@ export function pickBestVideoVariantUrl(
       score += 50_000_000;
     }
 
-    // 3. Resolution score (pixel area, descriptor hint like "1080p"/"HD"/"SD", or URL path hint)
+    // 3. Resolution score (pixel area, descriptor hint like "1080p"/"HD"/"SD", or URL hint)
     let resScore = 0;
     if (v.videoWidth && v.videoHeight) {
       resScore = v.videoWidth * v.videoHeight;
@@ -551,7 +688,10 @@ export function pickBestVideoVariantUrl(
         resScore = Math.max(resScore, inferDescriptorArea(d));
       }
       if (resScore === 0) {
-        if (/\/(?:hd|high|1080p?|720p?)(?:\/|[._-]|$)/i.test(v.url)) {
+        const urlHint = extractResolutionHint(v.url);
+        if (urlHint && urlHint.area > 0) {
+          resScore = urlHint.area;
+        } else if (/\/(?:hd|high|1080p?|720p?)(?:\/|[._-]|$)/i.test(v.url)) {
           resScore = 1280 * 720;
         } else if (/\/(?:sd|low|480p?|360p?)(?:\/|[._-]|$)/i.test(v.url)) {
           resScore = 640 * 360;

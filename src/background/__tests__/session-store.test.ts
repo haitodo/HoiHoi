@@ -448,4 +448,68 @@ describe('SessionStore', () => {
       origin: 'https://www.tokyomotion.net',
     });
   });
+
+  it('automatically integrates Pattern 1 resolution variants into one VideoItem and selects highest quality', () => {
+    const tabId = 205;
+    const groups: RawVideoCandidateGroup[] = [
+      {
+        occurrenceKey: 'el_1::link::https://cdn.example.com/videos/sample_720p.mp4',
+        primaryUrl: 'https://cdn.example.com/videos/sample_720p.mp4',
+        domOrder: 1,
+        durationSec: null,
+        variants: [
+          {
+            url: 'https://cdn.example.com/videos/sample_720p.mp4',
+            role: 'link-target',
+            source: 'link-href',
+            descriptor: '720p',
+            videoWidth: 1280,
+            videoHeight: 720,
+          },
+        ],
+      },
+      {
+        occurrenceKey: 'el_2::link::https://cdn.example.com/videos/sample_1080p.mp4',
+        primaryUrl: 'https://cdn.example.com/videos/sample_1080p.mp4',
+        domOrder: 2,
+        durationSec: null,
+        variants: [
+          {
+            url: 'https://cdn.example.com/videos/sample_1080p.mp4',
+            role: 'link-target',
+            source: 'link-href',
+            descriptor: '1080p',
+            videoWidth: 1920,
+            videoHeight: 1080,
+          },
+        ],
+      },
+      {
+        occurrenceKey: 'el_3::link::https://cdn.example.com/videos/sample_480p.mp4',
+        primaryUrl: 'https://cdn.example.com/videos/sample_480p.mp4',
+        domOrder: 3,
+        durationSec: null,
+        variants: [
+          {
+            url: 'https://cdn.example.com/videos/sample_480p.mp4',
+            role: 'link-target',
+            source: 'link-href',
+            descriptor: '480p',
+            videoWidth: 854,
+            videoHeight: 480,
+          },
+        ],
+      },
+    ];
+
+    store.mergeVideoCandidateGroups(tabId, 1, groups);
+
+    const snap = store.getSnapshot(tabId);
+    // Crucial check: all 3 resolution variants must merge into 1 single card!
+    expect(snap.videos).toHaveLength(1);
+    const video = snap.videos[0]!;
+    expect(video.variants).toHaveLength(3);
+    // Automatically selected URL MUST be the 1080p version!
+    expect(video.selectedUrl).toBe('https://cdn.example.com/videos/sample_1080p.mp4');
+  });
 });
