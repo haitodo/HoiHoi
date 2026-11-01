@@ -133,13 +133,17 @@ export function useTabSession(tabId: number | null) {
 
   // Command dispatchers
   const triggerRescan = useCallback(async () => {
-    if (tabId === null) return;
+    const targetTabId = tabId ?? -1;
     const msg: PanelToBackgroundMessage = {
       channel: 'WIC_PANEL_TO_BG',
       type: 'PANEL_TRIGGER_RESCAN',
-      tabId,
+      tabId: targetTabId,
     };
-    await chrome.runtime.sendMessage(msg);
+    try {
+      await chrome.runtime.sendMessage(msg);
+    } catch (err) {
+      console.warn('[WIC] Failed to send PANEL_TRIGGER_RESCAN:', err);
+    }
   }, [tabId]);
 
   const toggleSelection = useCallback(

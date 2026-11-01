@@ -23,16 +23,38 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
   if (scanStatus === 'unscanned') {
     title = 'このタブは未スキャンです';
     description =
-      'ブラウザ右上のツールバーにある Web Image Collector アイコンをクリックして、このタブのスキャンを開始してください。';
+      'ブラウザ右上のツールバーにある Web Image Collector アイコン（青い画像アイコン）をクリックするか、下のボタンを押してスキャンを開始してください。';
+    if (onRescan) {
+      action = (
+        <button
+          onClick={onRescan}
+          style={{
+            marginTop: 14,
+            padding: '8px 18px',
+            fontSize: 13,
+            backgroundColor: '#4f46e5',
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: 6,
+            cursor: 'pointer',
+            fontWeight: 600,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          }}
+        >
+          スキャンを開始する
+        </button>
+      );
+    }
   } else if (scanStatus === 'restricted') {
     title = 'このページはスキャンできません';
     description =
-      'ブラウザの内部保護ページ (chrome:// など) や Chrome Web Store では、セキュリティ上の理由から拡張機能による画像スキャンが制限されています。通常の Web ページでお試しください。';
+      statusMessage ||
+      'ブラウザの内部保護ページ (edge://, chrome:// など) や Web Store では、セキュリティ上の理由から拡張機能による画像スキャンが制限されています。画像のある通常の Web ページでお試しください。';
   } else if (scanStatus === 'stale') {
-    title = 'ページが移動または再読込されました';
+    title = 'タブへのアクセス権が必要です';
     description =
       statusMessage ||
-      'ページのアクセス権限を更新するため、ブラウザ右上の拡張機能アイコンをクリックしてください。';
+      'ブラウザのセキュリティ仕様により、ブラウザ右上のツールバーにある Web Image Collector アイコンをクリックしてアクセス権を許可してください。';
     if (onRescan) {
       action = (
         <button

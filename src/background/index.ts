@@ -83,11 +83,31 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   if (isPanelToBgMessage(message)) {
     void (async () => {
       await sessionStore.ensureHydrated();
-      const tabId = message.tabId;
+      let tabId = message.tabId;
+
+      // Fallback: If tabId is invalid or <= 0, query active tab directly from Background
+      if (!tabId || tabId <= 0) {
+        try {
+          const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+          if (activeTab?.id !== undefined) {
+            tabId = activeTab.id;
+          }
+        } catch {}
+      }
 
       switch (message.type) {
         case 'PANEL_GET_TAB_SESSION': {
-          const snapshot = sessionStore.getSnapshot(tabId);
+          let snapshot = sessionStore.getSnapshot(tabId);
+          // If session was unscanned and pageUrl is empty, try populating current tab info
+          if (snapshot.scanStatus === 'unscanned' && !snapshot.pageUrl && tabId > 0) {
+            try {
+              const tab = await chrome.tabs.get(tabId);
+              if (tab.url) {
+                const session = sessionStore.getOrCreateSession(tabId, tab.url);
+                snapshot = sessionStore.getSnapshot(tabId);
+              }
+            } catch {}
+          }
           sendResponse({ ok: true, data: snapshot });
           break;
         }

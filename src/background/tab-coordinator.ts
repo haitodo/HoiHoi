@@ -4,11 +4,13 @@ import { sessionStore } from './session-store';
 
 export async function bootstrapTabScan(
   tab: chrome.tabs.Tab,
-  openPanelPromise: Promise<void>,
+  openPanelPromise?: Promise<void>,
 ): Promise<void> {
-  await openPanelPromise.catch((err: unknown) => {
-    console.error('[WIC] Failed to open Side Panel:', err);
-  });
+  if (openPanelPromise) {
+    await openPanelPromise.catch((err: unknown) => {
+      console.error('[WIC] Failed to open Side Panel:', err);
+    });
+  }
 
   const tabId = tab.id;
   if (tabId === undefined) return;
@@ -20,7 +22,7 @@ export async function bootstrapTabScan(
     sessionStore.setScanStatus(
       tabId,
       'restricted',
-      'このページ（ブラウザ保護ページ・拡張機能管理画面など）ではスキャンできません',
+      `このページ (${url ? new URL(url).protocol : '内部ページ'}) はブラウザの保護ページのためスキャンできません。画像のある通常のWebページを開いてください`,
     );
     return;
   }
@@ -41,8 +43,33 @@ export async function bootstrapTabScan(
 
 export async function triggerTabRescan(tabId: number): Promise<boolean> {
   await sessionStore.ensureHydrated();
-  const session = sessionStore.getSession(tabId);
-  if (!session) return false;
+
+  // Retrieve current tab info to ensure URL and domain are up to date
+  let currentUrl = '';
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    currentUrl = tab.url || '';
+  } catch (err) {
+    console.warn('[WIC] Failed to get tab info for tabId:', tabId, err);
+  }
+
+  let session = sessionStore.getSession(tabId);
+  if (!session) {
+    session = sessionStore.getOrCreateSession(tabId, currentUrl);
+  } else if (currentUrl && (!session.pageUrl || session.pageUrl !== currentUrl)) {
+    session = sessionStore.resetSessionForNewPage(tabId, currentUrl, 'scanning');
+  }
+
+  const urlToCheck = currentUrl || session.pageUrl || '';
+  if (!isScannableUrl(urlToCheck)) {
+    const protocolHint = urlToCheck ? `${urlToCheck.slice(0, 30)}...` : '内部ページ';
+    sessionStore.setScanStatus(
+      tabId,
+      'restricted',
+      `このページ (${protocolHint}) はブラウザの保護ページ（拡張機能画面や設定等）のためスキャンできません。画像のある通常のWebサイトを開いてください`,
+    );
+    return false;
+  }
 
   sessionStore.setScanStatus(tabId, 'scanning');
   return injectAndStartScanner(tabId, session.scanEpoch);
@@ -89,7 +116,7 @@ async function injectAndStartScanner(
     sessionStore.setScanStatus(
       tabId,
       'stale',
-      'ページが再読込または移動しました。ブラウザ右上の拡張機能アイコンをクリックしてください',
+      'このタブをスキャンするには、ブラウザ右上のツールバーにある拡張機能アイコン（Web Image Collector）をクリックしてください',
     );
     return false;
   }
