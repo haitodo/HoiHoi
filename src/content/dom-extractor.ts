@@ -232,12 +232,19 @@ export function extractFromImageElement(
     });
   }
 
-  // 8. Check enclosing <a href> image link
-  const link = img.closest('a[href]');
+  // 8. Check enclosing <a href> or <a data-src> image link
+  const link = img.closest('a');
   if (link) {
-    const href = link.getAttribute('href');
-    if (href) {
-      const resolved = resolveAndValidateImageUrl(href, baseUri);
+    const rawLinkUrls = [
+      link.getAttribute('href'),
+      link.getAttribute('data-src'),
+      link.getAttribute('data-original'),
+      link.getAttribute('data-image'),
+    ].filter(Boolean) as string[];
+
+    for (const rawLinkUrl of rawLinkUrls) {
+      if (rawLinkUrl.startsWith('javascript:')) continue;
+      const resolved = resolveAndValidateImageUrl(rawLinkUrl, baseUri);
       if (resolved && isLikelyImageLinkHref(resolved) && !addedUrls.has(resolved)) {
         variants.push(
           normalizeAndRegisterCandidate(

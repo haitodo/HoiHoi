@@ -139,8 +139,10 @@ export function isLikelyImageLinkHref(urlStr: string): boolean {
       return false;
     }
     const path = parsed.pathname.toLowerCase();
+    // Check standard extension at end or before CDN preset modifiers like !sml, !lrg, !preview
+    const cleanPath = path.split('!')[0] ?? path;
     for (const ext of LIKELY_IMAGE_PATH_EXTENSIONS) {
-      if (path.endsWith(ext)) {
+      if (cleanPath.endsWith(ext)) {
         return true;
       }
     }
@@ -155,7 +157,7 @@ export function isLikelyImageLinkHref(urlStr: string): boolean {
  * Priority:
  * 1. `data:` MIME header
  * 2. `mimeHint` (<source type="...">)
- * 3. File extension in URL pathname
+ * 3. File extension in URL pathname (supports !preset suffixes like .jpeg!sml)
  * 4. Common format query parameters (`?format=webp`, `?fm=jpg`, etc.)
  */
 export function inferImageFormat(
@@ -177,7 +179,7 @@ export function inferImageFormat(
 
   try {
     const parsed = new URL(urlStr);
-    const path = parsed.pathname.toLowerCase();
+    const path = (parsed.pathname.split('!')[0] ?? parsed.pathname).toLowerCase();
 
     if (/\.(jpe?g)$/.test(path)) return 'jpeg';
     if (/\.png$/.test(path)) return 'png';

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FilterState, ImageItem } from '@shared/types';
 import { DownloadFooter } from './components/DownloadFooter';
 import { EmptyOrStatusView } from './components/EmptyOrStatusView';
@@ -35,6 +35,13 @@ export function App() {
 
   const rawItems = snapshot?.items || [];
   const selectedIdsSet = useMemo(() => new Set(snapshot?.selectedIds || []), [snapshot?.selectedIds]);
+
+  // Auto-trigger scan when Side Panel opens on an unscanned scannable page
+  useEffect(() => {
+    if (activeTabId && snapshot && snapshot.scanStatus === 'unscanned') {
+      void triggerRescan();
+    }
+  }, [activeTabId, snapshot?.scanStatus, triggerRescan]);
 
   // Count items with unknown dimensions when dimension filtering is active
   const hasDimensionFilter = (filter.minWidth ?? 0) > 0 || (filter.minHeight ?? 0) > 0;

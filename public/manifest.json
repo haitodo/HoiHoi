@@ -16,6 +16,10 @@
     "storage",
     "sidePanel"
   ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "action": {
     "default_title": "Web Image Collector を開いてこのタブをスキャン",
     "default_icon": {
