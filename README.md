@@ -1,4 +1,4 @@
-# Web Image Collector (仮称) - Chrome 拡張機能 (Manifest V3)
+# HoiHoi - Chrome 拡張機能 (Manifest V3)
 
 Webページ上の画像を検出し、Chrome Side Panel 上で選択・一括ダウンロードする Chrome 拡張機能の MVP 実装プロジェクトです。
 

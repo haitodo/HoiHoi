@@ -1,9 +1,9 @@
-﻿$OutputEncoding = [System.Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$Host.UI.RawUI.WindowTitle = "Web Image Collector - インストール案内"
+$OutputEncoding = [System.Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$Host.UI.RawUI.WindowTitle = "HoiHoi - インストール案内"
 
 Write-Host ""
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "   Web Image Collector - 拡張機能インストール案内 (Edge / Chrome)" -ForegroundColor Cyan
+Write-Host "   HoiHoi - 拡張機能インストール案内 (Edge / Chrome)" -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -72,7 +72,7 @@ Write-Host "    2. 「拡張機能」 → 「拡張機能の管理」をクリ�
 Write-Host "    3. 「開発者モード」を ON にして「$btnName」から「dist」を選択" -ForegroundColor White
 Write-Host ""
 Write-Host "  ★ 読み込み後、ブラウザ右上のパズルピースアイコンから" -ForegroundColor White
-Write-Host "     「Web Image Collector」をピン留めすると常時使えます！" -ForegroundColor Green
+Write-Host "     「HoiHoi」をピン留めすると常時使えます！" -ForegroundColor Green
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host ""
 

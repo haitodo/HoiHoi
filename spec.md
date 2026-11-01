@@ -1,10 +1,10 @@
-# Web Image Collector（仮称）機能仕様書 - MVP版
+# HoiHoi 機能仕様書 - MVP版
 
 > Imageyeの公開機能を参考に、Webページ上の画像検出・選択・ダウンロードに機能を絞ったChrome拡張機能の初期リリース仕様。
 
 | 項目 | 内容 |
 | --- | --- |
-| 文書名 | Web Image Collector（仮称）機能仕様書 - MVP版 |
+| 文書名 | HoiHoi 機能仕様書 - MVP版 |
 | 対象 | Google Chrome 拡張機能 / Manifest V3 |
 | 仕様書バージョン | 1.1（初期リリース向けスコープ再編） |
 | 作成日 | 2026-11-01 |

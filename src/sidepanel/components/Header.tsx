@@ -39,6 +39,11 @@ export const Header: React.FC<HeaderProps> = ({
     >
       <div style={{ overflow: 'hidden', marginRight: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <img
+            src="icons/icon-48.png"
+            alt="HoiHoi"
+            style={{ width: 18, height: 18, borderRadius: 4, flexShrink: 0 }}
+          />
           <span
             style={{
               fontWeight: 600,
@@ -49,9 +54,9 @@ export const Header: React.FC<HeaderProps> = ({
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
-            title={pageTitle ? `${pageTitle} (${domain ?? ''})` : domain || 'Web Image Collector'}
+            title={pageTitle ? `${pageTitle} (${domain ?? ''})` : domain || 'HoiHoi'}
           >
-            {pageTitle || domain || 'Web Image Collector'}
+            {pageTitle || domain || 'HoiHoi'}
           </span>
           <span
             style={{

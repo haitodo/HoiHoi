@@ -124,7 +124,7 @@ async function injectAndStartScanner(
     sessionStore.setScanStatus(
       tabId,
       'stale',
-      'このタブをスキャンするには、ブラウザ右上のツールバーにある拡張機能アイコン（Web Image Collector）をクリックしてください',
+      'このタブをスキャンするには、ブラウザ右上のツールバーにある拡張機能アイコン（HoiHoi）をクリックしてください',
     );
     return false;
   }

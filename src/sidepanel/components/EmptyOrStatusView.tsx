@@ -20,10 +20,19 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
   let description = '';
   let action: React.ReactNode = null;
 
+  let bannerIcon: React.ReactNode = null;
+
   if (scanStatus === 'unscanned') {
+    bannerIcon = (
+      <img
+        src="icons/icon-128.png"
+        alt="HoiHoi"
+        style={{ width: 64, height: 64, borderRadius: 16, marginBottom: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
+      />
+    );
     title = 'このタブは未スキャンです';
     description =
-      'ブラウザ右上のツールバーにある Web Image Collector アイコン（青い画像アイコン）をクリックするか、下のボタンを押してスキャンを開始してください。';
+      'ブラウザ右上のツールバーにある HoiHoi アイコンをクリックするか、下のボタンを押してスキャンを開始してください。';
     if (onRescan) {
       action = (
         <button
@@ -54,7 +63,7 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
     title = 'タブへのアクセス権が必要です';
     description =
       statusMessage ||
-      'ブラウザのセキュリティ仕様により、ブラウザ右上のツールバーにある Web Image Collector アイコンをクリックしてアクセス権を許可してください。';
+      'ブラウザのセキュリティ仕様により、ブラウザ右上のツールバーにある HoiHoi アイコンをクリックしてアクセス権を許可してください。';
     if (onRescan) {
       action = (
         <button
@@ -119,6 +128,7 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
         color: 'var(--color-text-muted)',
       }}
     >
+      {bannerIcon}
       <h3
         style={{
           fontSize: 14,

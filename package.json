@@ -1,5 +1,5 @@
 {
-  "name": "web-image-collector",
+  "name": "hoihoi",
   "version": "0.1.0",
   "private": true,
   "description": "Detect, filter, select, and batch-download images from web pages via Chrome Side Panel (MV3)",
