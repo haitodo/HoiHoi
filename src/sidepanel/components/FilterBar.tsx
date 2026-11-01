@@ -1,9 +1,11 @@
 import React from 'react';
-import type { FilterState, ImageFormat } from '@shared/types';
+import type { FilterState, ImageFormat, SortOrder } from '@shared/types';
 
 interface FilterBarProps {
   filter: FilterState;
   onChange: (next: FilterState) => void;
+  sortOrder: SortOrder;
+  onSortChange: (order: SortOrder) => void;
   unknownDimensionsCount: number;
 }
 
@@ -20,6 +22,8 @@ const AVAILABLE_FORMATS: Array<{ label: string; value: ImageFormat }> = [
 export const FilterBar: React.FC<FilterBarProps> = ({
   filter,
   onChange,
+  sortOrder,
+  onSortChange,
   unknownDimensionsCount,
 }) => {
   const toggleFormat = (fmt: ImageFormat) => {
@@ -61,9 +65,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         />
       </div>
 
-      {/* Dimension Filters */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
+      {/* Dimension Filters & Sort Order */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 70px' }}>
           <span style={{ fontSize: 11, color: '#666', whiteSpace: 'nowrap' }}>最小幅:</span>
           <input
             type="number"
@@ -87,7 +91,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 70px' }}>
           <span style={{ fontSize: 11, color: '#666', whiteSpace: 'nowrap' }}>最小高:</span>
           <input
             type="number"
@@ -109,6 +113,34 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               borderRadius: 4,
             }}
           />
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1.2 1 125px' }}>
+          <span style={{ fontSize: 11, color: '#666', whiteSpace: 'nowrap' }}>並び順:</span>
+          <select
+            value={sortOrder}
+            onChange={(e) => onSortChange(e.target.value as SortOrder)}
+            style={{
+              width: '100%',
+              padding: '4px 6px',
+              fontSize: 11,
+              border: '1px solid #d1d5db',
+              borderRadius: 4,
+              backgroundColor: '#ffffff',
+              color: '#374151',
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+            title="並び替え順序を変更"
+          >
+            <option value="position_asc">配置順 (上から下)</option>
+            <option value="position_desc">配置順 (下から上)</option>
+            <option value="size_desc">解像度 (大きい順)</option>
+            <option value="size_asc">解像度 (小さい順)</option>
+            <option value="filename_asc">ファイル名 (A-Z)</option>
+            <option value="filename_desc">ファイル名 (Z-A)</option>
+            <option value="selected_first">選択中を先頭</option>
+          </select>
         </div>
       </div>
 

@@ -204,3 +204,27 @@ function isValidExtensionForFormat(ext: string, format: ImageFormat): boolean {
       return true;
   }
 }
+
+/**
+ * Extracts a comparable filename stem or basename from a URL for sorting purposes.
+ * Supports http(s), data URLs, blob URLs, and percent-encoded paths.
+ */
+export function extractFilenameForSort(targetUrl: string): string {
+  if (!targetUrl) return '';
+  if (targetUrl.startsWith('http:') || targetUrl.startsWith('https:')) {
+    try {
+      const parsed = new URL(targetUrl);
+      const segments = parsed.pathname.split('/').filter(Boolean);
+      const lastSegment = segments[segments.length - 1];
+      if (lastSegment) {
+        try {
+          return decodeURIComponent(lastSegment);
+        } catch {
+          return lastSegment;
+        }
+      }
+    } catch {}
+  }
+  return targetUrl;
+}
+

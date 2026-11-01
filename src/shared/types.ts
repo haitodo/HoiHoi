@@ -154,6 +154,16 @@ export interface ItemDownloadState {
   updatedAt: number;
 }
 
+/** Sort criteria for displayed images in Side Panel. */
+export type SortOrder =
+  | 'position_asc'   // ページ上の配置順 (上から下)
+  | 'position_desc'  // ページ上の配置順 (下から上)
+  | 'size_desc'       // 解像度 (大きい順)
+  | 'size_asc'        // 解像度 (小さい順)
+  | 'filename_asc'   // ファイル名 (A-Z / 連番昇順)
+  | 'filename_desc'  // ファイル名 (Z-A / 連番降順)
+  | 'selected_first'; // 選択中を先頭
+
 /** Side Panel filter criteria (`spec.md` §4.1, MVP-11, MVP-12, MVP-13). */
 export interface FilterState {
   /** Case-insensitive substring query matched against `item.selectedUrl` (`spec.md` MVP-13). */

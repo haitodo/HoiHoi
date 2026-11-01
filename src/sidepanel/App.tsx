@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { FilterState, ImageItem } from '@shared/types';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { extractFilenameForSort } from '@shared/filename-utils';
+import type { FilterState, ImageItem, SortOrder } from '@shared/types';
 import { DownloadFooter } from './components/DownloadFooter';
 import { EmptyOrStatusView } from './components/EmptyOrStatusView';
 import { FilterBar } from './components/FilterBar';
@@ -33,6 +34,30 @@ export function App() {
   } = useTabSession(activeTabId);
 
   const [filter, setFilter] = useState<FilterState>(DEFAULT_FILTER);
+  const [sortOrder, setSortOrder] = useState<SortOrder>(() => {
+    try {
+      const saved = localStorage.getItem('wic_sort_order');
+      if (
+        saved === 'position_asc' ||
+        saved === 'position_desc' ||
+        saved === 'size_desc' ||
+        saved === 'size_asc' ||
+        saved === 'filename_asc' ||
+        saved === 'filename_desc' ||
+        saved === 'selected_first'
+      ) {
+        return saved;
+      }
+    } catch {}
+    return 'position_asc';
+  });
+
+  const handleSortChange = useCallback((nextOrder: SortOrder) => {
+    setSortOrder(nextOrder);
+    try {
+      localStorage.setItem('wic_sort_order', nextOrder);
+    } catch {}
+  }, []);
 
   const rawItems = snapshot?.items || [];
   const selectedIdsSet = useMemo(() => new Set(snapshot?.selectedIds || []), [snapshot?.selectedIds]);
@@ -44,7 +69,8 @@ export function App() {
     let unknownCount = 0;
     const query = filter.urlQuery.trim().toLowerCase();
 
-    const result = rawItems.filter((item: ImageItem) => {
+    // 1. Filter items
+    const matched = rawItems.filter((item: ImageItem) => {
       const activeVariant =
         item.variants.find((v) => v.url === item.selectedUrl) || item.variants[0];
 
@@ -80,8 +106,90 @@ export function App() {
       return true;
     });
 
-    return { filteredItems: result, unknownDimensionsCount: unknownCount };
-  }, [rawItems, filter, hasDimensionFilter]);
+    // 2. Sort items
+    const sorted = [...matched].sort((a, b) => {
+      const aVariant = a.variants.find((v) => v.url === a.selectedUrl) || a.variants[0];
+      const bVariant = b.variants.find((v) => v.url === b.selectedUrl) || b.variants[0];
+
+      switch (sortOrder) {
+        case 'position_asc':
+          return a.firstSeenOrder - b.firstSeenOrder;
+
+        case 'position_desc':
+          return b.firstSeenOrder - a.firstSeenOrder;
+
+        case 'size_desc': {
+          const aPixels =
+            aVariant?.naturalWidth && aVariant?.naturalHeight
+              ? aVariant.naturalWidth * aVariant.naturalHeight
+              : null;
+          const bPixels =
+            bVariant?.naturalWidth && bVariant?.naturalHeight
+              ? bVariant.naturalWidth * bVariant.naturalHeight
+              : null;
+
+          if (aPixels !== null && bPixels !== null) {
+            if (bPixels !== aPixels) return bPixels - aPixels;
+          } else if (aPixels !== null) {
+            return -1; // a has known dimensions, prioritize first
+          } else if (bPixels !== null) {
+            return 1; // b has known dimensions, prioritize first
+          }
+          return a.firstSeenOrder - b.firstSeenOrder;
+        }
+
+        case 'size_asc': {
+          const aPixels =
+            aVariant?.naturalWidth && aVariant?.naturalHeight
+              ? aVariant.naturalWidth * aVariant.naturalHeight
+              : null;
+          const bPixels =
+            bVariant?.naturalWidth && bVariant?.naturalHeight
+              ? bVariant.naturalWidth * bVariant.naturalHeight
+              : null;
+
+          if (aPixels !== null && bPixels !== null) {
+            if (aPixels !== bPixels) return aPixels - bPixels;
+          } else if (aPixels !== null) {
+            return -1; // a has known dimensions, prioritize first
+          } else if (bPixels !== null) {
+            return 1; // b has known dimensions, prioritize first
+          }
+          return a.firstSeenOrder - b.firstSeenOrder;
+        }
+
+        case 'filename_asc': {
+          const aName = extractFilenameForSort(a.selectedUrl);
+          const bName = extractFilenameForSort(b.selectedUrl);
+          const cmp = aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' });
+          if (cmp !== 0) return cmp;
+          return a.firstSeenOrder - b.firstSeenOrder;
+        }
+
+        case 'filename_desc': {
+          const aName = extractFilenameForSort(a.selectedUrl);
+          const bName = extractFilenameForSort(b.selectedUrl);
+          const cmp = bName.localeCompare(aName, undefined, { numeric: true, sensitivity: 'base' });
+          if (cmp !== 0) return cmp;
+          return a.firstSeenOrder - b.firstSeenOrder;
+        }
+
+        case 'selected_first': {
+          const aSelected = selectedIdsSet.has(a.itemId) ? 1 : 0;
+          const bSelected = selectedIdsSet.has(b.itemId) ? 1 : 0;
+          if (aSelected !== bSelected) {
+            return bSelected - aSelected;
+          }
+          return a.firstSeenOrder - b.firstSeenOrder;
+        }
+
+        default:
+          return a.firstSeenOrder - b.firstSeenOrder;
+      }
+    });
+
+    return { filteredItems: sorted, unknownDimensionsCount: unknownCount };
+  }, [rawItems, filter, hasDimensionFilter, sortOrder, selectedIdsSet]);
 
   // Calculate selected items that are currently hidden by filters (MVP-09, AT-12)
   const visibleItemIds = useMemo(() => filteredItems.map((i) => i.itemId), [filteredItems]);
@@ -138,6 +246,8 @@ export function App() {
           <FilterBar
             filter={filter}
             onChange={setFilter}
+            sortOrder={sortOrder}
+            onSortChange={handleSortChange}
             unknownDimensionsCount={unknownDimensionsCount}
           />
 

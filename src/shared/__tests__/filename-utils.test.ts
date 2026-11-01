@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildSafeDownloadFilename, buildSafeFolderName } from '../filename-utils';
+import {
+  buildSafeDownloadFilename,
+  buildSafeFolderName,
+  extractFilenameForSort,
+} from '../filename-utils';
 
 describe('filename-utils', () => {
   describe('buildSafeFolderName', () => {
@@ -134,6 +138,35 @@ describe('filename-utils', () => {
       });
       expect(name).toBe('Search_Cat_Dog_cute/item.png');
       expect(name.split('/')[0]).not.toMatch(/[:*?"<>|\\]/);
+    });
+  });
+
+  describe('extractFilenameForSort', () => {
+    it('extracts filename from standard URL with query string', () => {
+      const name = extractFilenameForSort('https://example.com/gallery/photo_01.jpg?w=800');
+      expect(name).toBe('photo_01.jpg');
+    });
+
+    it('decodes percent-encoded filenames', () => {
+      const name = extractFilenameForSort('https://example.com/images/%E3%83%8D%E3%82%B3_02.png');
+      expect(name).toBe('ネコ_02.png');
+    });
+
+    it('returns raw URL for data: and blob: URLs', () => {
+      expect(extractFilenameForSort('data:image/png;base64,abc')).toBe('data:image/png;base64,abc');
+      expect(extractFilenameForSort('blob:https://example.com/uuid')).toBe('blob:https://example.com/uuid');
+    });
+
+    it('sorts natural numbers correctly when combined with localeCompare', () => {
+      const urls = [
+        'https://example.com/img10.jpg',
+        'https://example.com/img2.jpg',
+        'https://example.com/img1.jpg',
+      ];
+      const sorted = urls.map(extractFilenameForSort).sort((a, b) =>
+        a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+      );
+      expect(sorted).toEqual(['img1.jpg', 'img2.jpg', 'img10.jpg']);
     });
   });
 });
