@@ -14,6 +14,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b %ERRORLEVEL%
 )
 
+echo.
 echo 出力先フォルダー (release) をエクスプローラーで開きます...
 start explorer "%~dp0release"
 echo.
