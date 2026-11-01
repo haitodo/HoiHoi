@@ -93,22 +93,6 @@ function createScannerController(): WicScannerController {
     }
   });
 
-  // Automatically start an initial scan once DOM is ready so images are discovered proactively
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      if (isExtensionContextValid()) {
-        chunkRunner.startOrRescan(currentScanEpoch);
-      }
-    });
-  } else {
-    // DOM already ready, scan immediately
-    setTimeout(() => {
-      if (isExtensionContextValid()) {
-        chunkRunner.startOrRescan(currentScanEpoch);
-      }
-    }, 100);
-  }
-
   return {
     startOrRescan(scanEpoch: number) {
       currentScanEpoch = scanEpoch;

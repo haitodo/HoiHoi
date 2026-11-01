@@ -167,6 +167,12 @@ export type PanelToBackgroundMessage =
 export type BackgroundToPanelEvent =
   | {
       channel: 'WIC_BG_TO_PANEL';
+      type: 'EVENT_ACTION_CLICKED';
+      tabId: number;
+      windowId?: number;
+    }
+  | {
+      channel: 'WIC_BG_TO_PANEL';
       type: 'EVENT_SESSION_REPLACED';
       tabId: number;
       snapshot: TabSessionSnapshot;

@@ -46,6 +46,7 @@ export function useTabSession(tabId: number | null) {
 
     const handleMessage = (msg: unknown) => {
       if (!isBgToPanelEvent(msg)) return;
+      if (msg.type === 'EVENT_ACTION_CLICKED') return;
       // Accept events for current tab, or if tabId was not yet resolved (<= 0)
       if (tabId !== null && tabId > 0 && msg.tabId !== tabId) return;
 

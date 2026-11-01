@@ -8,6 +8,8 @@ interface HeaderProps {
   scanStatus: ScanStatus;
   statusMessage?: string;
   onRescan: () => void;
+  isPinned?: boolean;
+  onTogglePin?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -17,6 +19,8 @@ export const Header: React.FC<HeaderProps> = ({
   scanStatus,
   statusMessage,
   onRescan,
+  isPinned,
+  onTogglePin,
 }) => {
   return (
     <header
@@ -73,23 +77,52 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      <button
-        onClick={onRescan}
-        disabled={scanStatus === 'scanning' || scanStatus === 'restricted'}
-        style={{
-          padding: '4px 10px',
-          fontSize: 12,
-          fontWeight: 500,
-          border: '1px solid #d1d5db',
-          borderRadius: 6,
-          backgroundColor: '#f9fafb',
-          cursor: scanStatus === 'scanning' ? 'not-allowed' : 'pointer',
-          whiteSpace: 'nowrap',
-        }}
-        title="ページを再スキャンして新しい画像を統合します"
-      >
-        再スキャン
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {onTogglePin && (
+          <button
+            onClick={onTogglePin}
+            style={{
+              padding: '4px 8px',
+              fontSize: 12,
+              fontWeight: 500,
+              border: isPinned ? '1px solid #6366f1' : '1px solid #d1d5db',
+              borderRadius: 6,
+              backgroundColor: isPinned ? '#eef2ff' : '#ffffff',
+              color: isPinned ? '#4338ca' : '#4b5563',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+            title={
+              isPinned
+                ? 'タブ固定中: 他のタブや別ウィンドウを選択してもこのページの表示を維持します（クリックで追従モードに変更）'
+                : 'タブ追従中: ブラウザのアクティブタブに合わせて表示を切り替えます（クリックで現在のタブに固定）'
+            }
+          >
+            <span>{isPinned ? '📌 固定中' : '🔓 追従中'}</span>
+          </button>
+        )}
+
+        <button
+          onClick={onRescan}
+          disabled={scanStatus === 'scanning' || scanStatus === 'restricted'}
+          style={{
+            padding: '4px 10px',
+            fontSize: 12,
+            fontWeight: 500,
+            border: '1px solid #d1d5db',
+            borderRadius: 6,
+            backgroundColor: '#f9fafb',
+            cursor: scanStatus === 'scanning' ? 'not-allowed' : 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+          title="ページを再スキャンして新しい画像を統合します"
+        >
+          再スキャン
+        </button>
+      </div>
     </header>
   );
 };

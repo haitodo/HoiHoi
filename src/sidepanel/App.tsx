@@ -18,7 +18,7 @@ const DEFAULT_FILTER: FilterState = {
 };
 
 export function App() {
-  const activeTabId = useActiveTabId();
+  const { activeTabId, isPinned, togglePin } = useActiveTabId();
   const {
     snapshot,
     triggerRescan,
@@ -36,13 +36,6 @@ export function App() {
 
   const rawItems = snapshot?.items || [];
   const selectedIdsSet = useMemo(() => new Set(snapshot?.selectedIds || []), [snapshot?.selectedIds]);
-
-  // Auto-trigger scan when Side Panel opens on an unscanned scannable page
-  useEffect(() => {
-    if (activeTabId && snapshot && snapshot.scanStatus === 'unscanned') {
-      void triggerRescan();
-    }
-  }, [activeTabId, snapshot?.scanStatus, triggerRescan]);
 
   // Count items with unknown dimensions when dimension filtering is active
   const hasDimensionFilter = (filter.minWidth ?? 0) > 0 || (filter.minHeight ?? 0) > 0;
@@ -136,6 +129,8 @@ export function App() {
         scanStatus={scanStatus}
         statusMessage={snapshot?.statusMessage}
         onRescan={triggerRescan}
+        isPinned={isPinned}
+        onTogglePin={togglePin}
       />
 
       {scanStatus !== 'unscanned' && scanStatus !== 'restricted' && (

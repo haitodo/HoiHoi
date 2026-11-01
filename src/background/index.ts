@@ -33,6 +33,18 @@ chrome.action.onClicked.addListener((tab) => {
   const openPanelPromise = chrome.sidePanel.open({ tabId: tab.id });
 
   void bootstrapTabScan(tab, openPanelPromise);
+
+  // Notify Side Panel of user-initiated action click on this tab
+  try {
+    chrome.runtime
+      .sendMessage({
+        channel: 'WIC_BG_TO_PANEL',
+        type: 'EVENT_ACTION_CLICKED',
+        tabId: tab.id,
+        windowId: tab.windowId,
+      })
+      .catch(() => {});
+  } catch {}
 });
 
 // Broadcast session events to any open extension views (Side Panel)
