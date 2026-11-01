@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Web Image Collector",
+  "version": "0.1.0",
+  "description": "表示中のWebページから画像を検出し、Side Panelで選択・保存します。",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "downloads",
+    "storage",
+    "sidePanel"
+  ],
+  "action": {
+    "default_title": "Web Image Collector を開いてこのタブをスキャン"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}

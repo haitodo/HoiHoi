@@ -1,0 +1,156 @@
+import {
+  isContentToBgMessage,
+  isPanelToBgMessage,
+  type BackgroundToPanelEvent,
+} from '@shared/messages';
+import { downloadManager } from './download-manager';
+import { sessionStore } from './session-store';
+import {
+  bootstrapTabScan,
+  handleTabNavigation,
+  triggerTabRescan,
+} from './tab-coordinator';
+
+/**
+ * Background Service Worker Entrypoint (Manifest V3)
+ *
+ * CRITICAL INVARIANTS (`design.md` §2, §3, §5):
+ * 1. Register ALL chrome.* event listeners synchronously at top-level.
+ * 2. Keep openPanelOnActionClick: false so chrome.action.onClicked fires and grants activeTab.
+ * 3. Call chrome.sidePanel.open({ tabId }) synchronously before any await in action.onClicked.
+ * 4. Forward session events to open Side Panel pages via chrome.runtime.sendMessage.
+ */
+
+chrome.runtime.onInstalled.addListener(() => {
+  void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
+  void downloadManager.init();
+});
+
+chrome.action.onClicked.addListener((tab) => {
+  if (tab.id === undefined) return;
+
+  // MUST stay synchronous (no await above this line) to preserve user gesture
+  const openPanelPromise = chrome.sidePanel.open({ tabId: tab.id });
+
+  void bootstrapTabScan(tab, openPanelPromise);
+});
+
+// Broadcast session events to any open extension views (Side Panel)
+sessionStore.onEvent((event: BackgroundToPanelEvent) => {
+  chrome.runtime.sendMessage(event).catch(() => {
+    // Side Panel might be closed or switching tabs; safe to ignore
+  });
+});
+
+chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+  if (isContentToBgMessage(message)) {
+    const tabId = sender.tab?.id;
+    if (tabId === undefined) {
+      sendResponse({ ok: false, error: 'Unknown sender tab' });
+      return false;
+    }
+
+    void (async () => {
+      await sessionStore.ensureHydrated();
+
+      switch (message.type) {
+        case 'CONTENT_SCAN_BATCH': {
+          sessionStore.mergeCandidateGroups(tabId, message.scanEpoch, message.groups);
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'CONTENT_SCAN_STATUS': {
+          sessionStore.setScanStatus(tabId, message.status);
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'CONTENT_IMAGE_LOADED_DIMENSIONS': {
+          sessionStore.updateItemDimensions(
+            tabId,
+            message.url,
+            message.naturalWidth,
+            message.naturalHeight,
+          );
+          sendResponse({ ok: true });
+          break;
+        }
+      }
+    })();
+
+    return true; // Keep channel open for async response
+  }
+
+  if (isPanelToBgMessage(message)) {
+    void (async () => {
+      await sessionStore.ensureHydrated();
+      const tabId = message.tabId;
+
+      switch (message.type) {
+        case 'PANEL_GET_TAB_SESSION': {
+          const snapshot = sessionStore.getSnapshot(tabId);
+          sendResponse({ ok: true, data: snapshot });
+          break;
+        }
+
+        case 'PANEL_TRIGGER_RESCAN': {
+          const ok = await triggerTabRescan(tabId);
+          sendResponse({ ok });
+          break;
+        }
+
+        case 'PANEL_UPDATE_SELECTION': {
+          const selectedIds = sessionStore.updateSelection(tabId, message.mutation);
+          sendResponse({ ok: true, data: selectedIds });
+          break;
+        }
+
+        case 'PANEL_SELECT_VARIANT': {
+          const ok = sessionStore.selectVariant(tabId, message.itemId, message.variantUrl);
+          sendResponse({ ok });
+          break;
+        }
+
+        case 'PANEL_REPORT_THUMB_DIMENSIONS': {
+          sessionStore.updateItemDimensions(
+            tabId,
+            message.variantUrl,
+            message.naturalWidth,
+            message.naturalHeight,
+          );
+          sendResponse({ ok: true });
+          break;
+        }
+
+        case 'PANEL_ENQUEUE_DOWNLOADS': {
+          downloadManager.enqueue(tabId, message.itemIds);
+          sendResponse({ ok: true });
+          break;
+        }
+
+        case 'PANEL_RETRY_FAILED_DOWNLOADS': {
+          downloadManager.retryFailed(tabId, message.itemIds);
+          sendResponse({ ok: true });
+          break;
+        }
+      }
+    })();
+
+    return true; // Keep channel open for async response
+  }
+
+  return false;
+});
+
+chrome.downloads.onChanged.addListener((delta) => {
+  downloadManager.handleDownloadDelta(delta);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'loading') {
+    handleTabNavigation(tabId);
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  sessionStore.removeTab(tabId);
+});

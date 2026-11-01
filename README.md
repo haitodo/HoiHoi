@@ -1,1 +1,64 @@
-# HoiHoi
+# Web Image Collector (仮称) - Chrome 拡張機能 (Manifest V3)
+
+Webページ上の画像を検出し、Chrome Side Panel 上で選択・一括ダウンロードする Chrome 拡張機能の MVP 実装プロジェクトです。
+
+## 重要なドキュメント
+
+1. **[spec.md](spec.md)**: 利用者向け機能仕様書 (MVP版 v1.1)
+2. **[design.md](design.md)**: **コアアーキテクチャ技術設計書** (必須の7大ガードレール、データ構造、非同期同期モデル、別のAIへの実装委譲タスク一覧)
+
+---
+
+## 開発ルール・制約事項
+
+- **パッケージマネージャー**: `pnpm` のみ使用（`npm` / `yarn` / `bun` の使用は厳禁）
+- **対応ブラウザ**: Chrome 116 以降（`action.onClicked` と `chrome.sidePanel.open` の連携）
+- **ビルドツール**: Vite 6（Side Panel + Background SW の ESM ビルド と、動的注入 Content Script の単一 IIFE ビルドの2段構成）
+- **UI フレームワーク**: React 19 + TypeScript + `@tanstack/react-virtual`（仮想スクロール）
+
+---
+
+## コマンド一覧
+
+```powershell
+# 依存関係のインストール (pnpm 必須)
+pnpm install
+
+# 型チェックと拡張機能のビルド (dist/ に出力)
+pnpm build
+
+# 単体テストの実行 (Vitest)
+pnpm test
+```
+
+### Chrome への読み込み方法
+
+1. Google Chrome で `chrome://extensions` を開く
+2. 右上の「デベロッパー モード」を ON にする
+3. 「パッケージ化されていない拡張機能を読み込む」をクリックし、このリポジトリの `dist` ディレクトリを選択する
+
+---
+
+## 実装状況（完了）
+
+仕様書（`spec.md`）および設計書（`design.md`）の全要件・全タスクの実装が完了し、本番ビルドおよび単体テストが正常に通過しています。
+
+- **Step 1: 共有純粋ロジック (完了)**:
+  - `src/shared/url-utils.ts`: URL解決・スキーム検証・CDNカンマ混入srcset解析・CSS背景url解析・拡張子判定・形式推定
+  - `src/shared/filename-utils.ts`: Windows予約デバイス名（CON, PRN等）対応・禁止文字サニタイズ・100文字制限・重複回避
+  - `src/shared/__tests__/*.test.ts`: 単体テスト22件通過
+- **Step 2: Content Script スキャナ (完了)**:
+  - `src/content/dom-extractor.ts`: img/picture/css-bg/svg/lazy/a.href からの候補グループ抽出、32KB超 data: URL の退避
+  - `src/content/chunk-runner.ts`: 8msタイムスライス走査、40件/50msバッチ送信、MutationObserver（150msデバウンス）、キャプチャ load イベントによる寸法追従
+  - `src/content/blob-reader.ts`: ページオリジン内でのオンデマンド blob: → Data URL 変換（25MB上限）
+  - `src/content/scanner.ts`: `window.__WIC_SCANNER__` による多重登録防止ガード付き単一 IIFE エントリ
+- **Step 3: Background Service Worker (完了)**:
+  - `src/background/session-store.ts`: tabId別セッション管理、occurrenceKey重複防止、10MBクォータ保護、直列デバウンス永続化
+  - `src/background/tab-coordinator.ts`: activeTab起動時のスクリプト注入、ページ遷移 stale 検知、再スキャン制御
+  - `src/background/download-manager.ts`: 同時実行3件FIFOキュー、blob解決連携、InterruptReason分類、SW再起動時の突合
+  - `src/background/index.ts`: 同期 sidePanel.open ガード付き Service Worker エントリ
+- **Step 4: Side Panel UI (完了)**:
+  - `src/sidepanel/hooks/useActiveTabId.ts`: tabs権限不要のアクティブタブ追跡
+  - `src/sidepanel/hooks/useTabSession.ts`: revision 自己修復型 Delta 購読
+  - `src/sidepanel/components/*`: Header, FilterBar, SelectionToolbar, ImageGrid (TanStack Virtual 行仮想化), ImageCard, DownloadFooter, EmptyOrStatusView
+  - `src/sidepanel/App.tsx`: 統合レイアウト・フィルター・選択状態管理
