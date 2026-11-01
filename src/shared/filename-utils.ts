@@ -1,8 +1,8 @@
-import { MAX_FILENAME_STEM_LENGTH } from './constants';
+import { MAX_FILENAME_STEM_LENGTH, MAX_FOLDER_NAME_LENGTH } from './constants';
 import type { ImageFormat } from './types';
 import { inferImageFormat } from './url-utils';
 
-const WINDOWS_RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+const WINDOWS_RESERVED_NAMES = /^(con|prn|aux|nul|com[0-9]|lpt[0-9]|conin\$|conout\$)(\..*)?$/i;
 
 // Disallowed characters in Windows/POSIX file paths: \ / : * ? " < > | and control characters
 const ILLEGAL_FILENAME_CHARS = /[\\/:*?"<>|\x00-\x1f\x7f]/g;
@@ -20,6 +20,70 @@ const FORMAT_TO_EXTENSION: Record<ImageFormat, string> = {
 };
 
 /**
+ * Builds a safe, cross-platform folder name for saving downloaded images.
+ *
+ * Rules:
+ * 1. Sanitizes forbidden filesystem characters (\ / : * ? " < > | and control chars) into '_'.
+ * 2. Normalizes multiple spaces, tabs, and newlines.
+ * 3. Strips leading and trailing dots, spaces, underscores, and full-width spaces.
+ * 4. Falls back to sanitized domain or 'images' if title is empty or becomes empty.
+ * 5. Handles Windows reserved device names (CON, PRN, AUX, NUL, COM0-9, LPT0-9).
+ * 6. Truncates length to `MAX_FOLDER_NAME_LENGTH` (80 chars) to prevent Windows MAX_PATH overflows.
+ */
+export function buildSafeFolderName(title?: string, domain?: string): string {
+  let raw = (title ?? '').trim();
+
+  // 1. Replace newlines, tabs, and control characters with a space
+  raw = raw.replace(/[\r\n\t\f\v]+/g, ' ');
+
+  // 2. Replace illegal filesystem characters with '_'
+  raw = raw.replace(ILLEGAL_FILENAME_CHARS, '_');
+
+  // 3. Clean up mixed spaces and underscores to produce readable folder names
+  raw = raw.replace(/\s*_\s*/g, '_');
+  raw = raw.replace(/_+/g, '_');
+  raw = raw.replace(/\s+/g, ' ');
+
+  // 4. Strip leading and trailing periods, spaces, full-width spaces, and underscores
+  raw = raw.replace(/^[.\s\u3000_]+|[.\s\u3000_]+$/g, '');
+
+  // 5. Fallback if empty
+  if (!raw) {
+    if (domain) {
+      const cleanDomain = domain
+        .replace(ILLEGAL_FILENAME_CHARS, '_')
+        .replace(/^[.\s\u3000_]+|[.\s\u3000_]+$/g, '');
+      if (cleanDomain) {
+        raw = cleanDomain;
+      }
+    }
+    if (!raw) {
+      raw = 'images';
+    }
+  }
+
+  // 6. Handle Windows reserved device names
+  if (WINDOWS_RESERVED_NAMES.test(raw)) {
+    raw = `_${raw}`;
+  }
+
+  // 7. Truncate length
+  if (raw.length > MAX_FOLDER_NAME_LENGTH) {
+    raw = raw.slice(0, MAX_FOLDER_NAME_LENGTH);
+    // Re-trim trailing dots/spaces/underscores created by truncation
+    raw = raw.replace(/[.\s\u3000_]+$/g, '');
+    if (!raw) {
+      raw = 'images';
+    }
+    if (WINDOWS_RESERVED_NAMES.test(raw)) {
+      raw = `_${raw}`;
+    }
+  }
+
+  return raw;
+}
+
+/**
  * Builds a safe, cross-platform filename for downloading (`spec.md` §7.1, AT-17).
  *
  * Rules:
@@ -28,14 +92,17 @@ const FORMAT_TO_EXTENSION: Record<ImageFormat, string> = {
  * 3. Sanitizes forbidden filesystem characters and Windows reserved names (CON, NUL, PRN, etc.).
  * 4. Truncates excessively long stems to `MAX_FILENAME_STEM_LENGTH` (100 chars).
  * 5. Appends extension based on inferred format if missing or mismatched.
+ * 6. If `folderName` or `pageTitle` is provided, prepends a safe subdirectory.
  */
 export function buildSafeDownloadFilename(options: {
   targetUrl: string;
   domain?: string;
+  pageTitle?: string;
+  folderName?: string;
   itemIndex?: number;
   format?: ImageFormat;
 }): string {
-  const { targetUrl, domain, itemIndex = 1, format } = options;
+  const { targetUrl, domain, pageTitle, folderName, itemIndex = 1, format } = options;
   const inferredFormat = format ?? inferImageFormat(targetUrl);
   const extFromFormat = FORMAT_TO_EXTENSION[inferredFormat];
 
@@ -103,7 +170,16 @@ export function buildSafeDownloadFilename(options: {
     finalExt = extFromFormat;
   }
 
-  return `${cleanStem}${finalExt}`;
+  const safeFilename = `${cleanStem}${finalExt}`;
+
+  // If folderName or pageTitle is provided, prepend safe subdirectory
+  const folderCandidate = folderName !== undefined ? folderName : pageTitle;
+  if (folderCandidate !== undefined) {
+    const safeFolder = buildSafeFolderName(folderCandidate, domain);
+    return `${safeFolder}/${safeFilename}`;
+  }
+
+  return safeFilename;
 }
 
 function isValidExtensionForFormat(ext: string, format: ImageFormat): boolean {

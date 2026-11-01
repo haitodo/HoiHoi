@@ -1,7 +1,61 @@
 import { describe, expect, it } from 'vitest';
-import { buildSafeDownloadFilename } from '../filename-utils';
+import { buildSafeDownloadFilename, buildSafeFolderName } from '../filename-utils';
 
 describe('filename-utils', () => {
+  describe('buildSafeFolderName', () => {
+    it('preserves clean titles', () => {
+      const folder = buildSafeFolderName('My Vacation Photos 2026');
+      expect(folder).toBe('My Vacation Photos 2026');
+    });
+
+    it('sanitizes illegal Windows/POSIX characters', () => {
+      const folder = buildSafeFolderName('Photos: Summer / Fall * 2026 <Special> | "Quote"?');
+      expect(folder).toBe('Photos_Summer_Fall_2026_Special_Quote');
+      expect(folder).not.toMatch(/[\\/:*?"<>|]/);
+    });
+
+    it('normalizes newlines, carriage returns, and tabs to spaces', () => {
+      const folder = buildSafeFolderName("Line 1\r\n\tLine 2\nEnd");
+      expect(folder).toBe('Line 1 Line 2 End');
+    });
+
+    it('strips leading and trailing dots, spaces, full-width spaces, and underscores', () => {
+      const folder = buildSafeFolderName('  ...__My Album__..  \u3000');
+      expect(folder).toBe('My Album');
+    });
+
+    it('escapes Windows reserved device names with an underscore prefix', () => {
+      expect(buildSafeFolderName('CON')).toBe('_CON');
+      expect(buildSafeFolderName('con')).toBe('_con');
+      expect(buildSafeFolderName('PRN')).toBe('_PRN');
+      expect(buildSafeFolderName('AUX')).toBe('_AUX');
+      expect(buildSafeFolderName('NUL')).toBe('_NUL');
+      expect(buildSafeFolderName('COM1')).toBe('_COM1');
+      expect(buildSafeFolderName('LPT9')).toBe('_LPT9');
+    });
+
+    it('falls back to domain when title is empty, whitespace, or invalid characters only', () => {
+      expect(buildSafeFolderName('', 'example.com')).toBe('example.com');
+      expect(buildSafeFolderName('   \t\n  ', 'example.com')).toBe('example.com');
+      expect(buildSafeFolderName('***???///:::', 'example.com')).toBe('example.com');
+    });
+
+    it('falls back to "images" when both title and domain are absent or empty', () => {
+      expect(buildSafeFolderName('')).toBe('images');
+      expect(buildSafeFolderName('   ')).toBe('images');
+      expect(buildSafeFolderName(':::***???')).toBe('images');
+    });
+
+    it('truncates excessively long titles to safe length (MAX_FOLDER_NAME_LENGTH) and trims trailing chars', () => {
+      const longTitle = 'a'.repeat(60) + ' ' + 'b'.repeat(60);
+      const folder = buildSafeFolderName(longTitle);
+      expect(folder.length).toBeLessThanOrEqual(80);
+      expect(folder.endsWith(' ')).toBe(false);
+      expect(folder.endsWith('.')).toBe(false);
+      expect(folder.endsWith('_')).toBe(false);
+    });
+  });
+
   describe('buildSafeDownloadFilename', () => {
     it('extracts basename and extension from standard URL', () => {
       const name = buildSafeDownloadFilename({
@@ -52,6 +106,34 @@ describe('filename-utils', () => {
       });
       expect(name.endsWith('.gif')).toBe(true);
       expect(name.length).toBe(100 + '.gif'.length);
+    });
+
+    it('prepends safe folder name when pageTitle is provided', () => {
+      const name = buildSafeDownloadFilename({
+        targetUrl: 'https://example.com/gallery/landscape.jpg',
+        pageTitle: 'Beautiful Nature & Landscapes',
+        domain: 'example.com',
+      });
+      expect(name).toBe('Beautiful Nature & Landscapes/landscape.jpg');
+    });
+
+    it('falls back to domain folder when pageTitle is empty', () => {
+      const name = buildSafeDownloadFilename({
+        targetUrl: 'https://example.com/gallery/landscape.jpg',
+        pageTitle: '',
+        domain: 'example.com',
+      });
+      expect(name).toBe('example.com/landscape.jpg');
+    });
+
+    it('sanitizes folder name containing Windows prohibited characters', () => {
+      const name = buildSafeDownloadFilename({
+        targetUrl: 'https://example.com/images/item.png',
+        pageTitle: 'Search: "Cat / Dog" *cute* ?',
+        domain: 'example.com',
+      });
+      expect(name).toBe('Search_Cat_Dog_cute/item.png');
+      expect(name.split('/')[0]).not.toMatch(/[:*?"<>|\\]/);
     });
   });
 });

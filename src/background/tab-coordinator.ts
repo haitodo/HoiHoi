@@ -18,6 +18,7 @@ export async function bootstrapTabScan(
   await sessionStore.ensureHydrated();
 
   const url = tab.url || '';
+  const title = tab.title;
   if (!isScannableUrl(url)) {
     sessionStore.setScanStatus(
       tabId,
@@ -31,9 +32,12 @@ export async function bootstrapTabScan(
   let sessionEpoch: number;
 
   if (!existingSession || existingSession.pageUrl !== url) {
-    const session = sessionStore.resetSessionForNewPage(tabId, url, 'scanning');
+    const session = sessionStore.resetSessionForNewPage(tabId, url, 'scanning', title);
     sessionEpoch = session.scanEpoch;
   } else {
+    if (title) {
+      sessionStore.updatePageTitle(tabId, title);
+    }
     sessionStore.setScanStatus(tabId, 'scanning');
     sessionEpoch = existingSession.scanEpoch;
   }
@@ -44,20 +48,24 @@ export async function bootstrapTabScan(
 export async function triggerTabRescan(tabId: number): Promise<boolean> {
   await sessionStore.ensureHydrated();
 
-  // Retrieve current tab info to ensure URL and domain are up to date
+  // Retrieve current tab info to ensure URL, title and domain are up to date
   let currentUrl = '';
+  let currentTitle = '';
   try {
     const tab = await chrome.tabs.get(tabId);
     currentUrl = tab.url || '';
+    currentTitle = tab.title || '';
   } catch (err) {
     console.warn('[WIC] Failed to get tab info for tabId:', tabId, err);
   }
 
   let session = sessionStore.getSession(tabId);
   if (!session) {
-    session = sessionStore.getOrCreateSession(tabId, currentUrl);
+    session = sessionStore.getOrCreateSession(tabId, currentUrl, currentTitle);
   } else if (currentUrl && (!session.pageUrl || session.pageUrl !== currentUrl)) {
-    session = sessionStore.resetSessionForNewPage(tabId, currentUrl, 'scanning');
+    session = sessionStore.resetSessionForNewPage(tabId, currentUrl, 'scanning', currentTitle);
+  } else if (currentTitle) {
+    sessionStore.updatePageTitle(tabId, currentTitle);
   }
 
   const urlToCheck = currentUrl || session.pageUrl || '';

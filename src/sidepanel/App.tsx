@@ -131,6 +131,7 @@ export function App() {
     >
       <Header
         domain={snapshot?.domain}
+        pageTitle={snapshot?.pageTitle}
         itemCount={rawItems.length}
         scanStatus={scanStatus}
         statusMessage={snapshot?.statusMessage}

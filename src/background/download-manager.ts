@@ -206,10 +206,11 @@ export class DownloadManager {
       }
     }
 
-    // Generate safe filename
+    // Generate safe filename with folder based on page title
     const filename = buildSafeDownloadFilename({
       targetUrl,
       domain: session.domain,
+      pageTitle: session.pageTitle ?? session.domain ?? 'images',
       format: variant?.format,
     });
 

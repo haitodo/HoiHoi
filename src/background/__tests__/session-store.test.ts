@@ -160,4 +160,22 @@ describe('SessionStore', () => {
     expect(items[0]?.selectedUrl).toBe('https://example.com/orig1.jpg');
     expect(items[1]?.selectedUrl).toBe('https://example.com/orig2.jpg');
   });
+
+  it('stores pageTitle and includes it in TabSessionSnapshot', () => {
+    const tabId = 104;
+    store.resetSessionForNewPage(tabId, 'https://example.com/gallery', 'scanning', 'My Gallery Title');
+
+    let snapshot = store.getSnapshot(tabId);
+    expect(snapshot.pageTitle).toBe('My Gallery Title');
+
+    // Update via updatePageTitle
+    store.updatePageTitle(tabId, 'Updated Gallery Title');
+    snapshot = store.getSnapshot(tabId);
+    expect(snapshot.pageTitle).toBe('Updated Gallery Title');
+
+    // Update via mergeCandidateGroups
+    store.mergeCandidateGroups(tabId, 2, [], 'Batch Title Override');
+    snapshot = store.getSnapshot(tabId);
+    expect(snapshot.pageTitle).toBe('Batch Title Override');
+  });
 });

@@ -40,6 +40,9 @@ export const BLOB_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
 /** Maximum sanitized filename stem length (excluding dot + extension) (`spec.md` §7.1). */
 export const MAX_FILENAME_STEM_LENGTH = 100;
 
+/** Maximum sanitized folder name length to avoid Windows MAX_PATH (260 chars) overflows (`spec.md` §7.1). */
+export const MAX_FOLDER_NAME_LENGTH = 80;
+
 /** Allowed URL protocols for candidate extraction (`spec.md` §6.4, §9). Never allow `javascript:` etc. */
 export const ALLOWED_IMAGE_PROTOCOLS = new Set(['http:', 'https:', 'data:', 'blob:']);
 

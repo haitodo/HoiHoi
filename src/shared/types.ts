@@ -192,6 +192,8 @@ export interface TabSessionSnapshot {
   pageUrl?: string;
   /** Hostname displayed in Side Panel header (`spec.md` §4.1, §4.3). */
   domain?: string;
+  /** Page title extracted from `<head><title>` used for folder naming. */
+  pageTitle?: string;
   /** Epoch ID incremented when the tab navigates to a new document so stale content batches are dropped. */
   scanEpoch: number;
   scanStatus: ScanStatus;

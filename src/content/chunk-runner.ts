@@ -79,6 +79,7 @@ export function createChunkRunner(options: {
       type: 'CONTENT_SCAN_BATCH',
       scanEpoch: currentScanEpoch,
       pageUrl: window.location.href,
+      pageTitle: document.title || undefined,
       groups: groupsToSend,
     };
 
@@ -162,6 +163,7 @@ export function createChunkRunner(options: {
       type: 'CONTENT_SCAN_STATUS',
       scanEpoch: currentScanEpoch,
       pageUrl: window.location.href,
+      pageTitle: document.title || undefined,
       status: 'watching',
     };
     chrome.runtime.sendMessage(statusMsg).catch(() => {});
@@ -264,6 +266,7 @@ export function createChunkRunner(options: {
         type: 'CONTENT_SCAN_STATUS',
         scanEpoch: currentScanEpoch,
         pageUrl: window.location.href,
+        pageTitle: document.title || undefined,
         status: 'scanning',
       };
       chrome.runtime.sendMessage(statusMsg).catch(() => {});

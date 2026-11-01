@@ -30,6 +30,7 @@ export type ContentToBackgroundMessage =
       type: 'CONTENT_SCAN_BATCH';
       scanEpoch: number;
       pageUrl: string;
+      pageTitle?: string;
       groups: RawCandidateGroup[];
     }
   | {
@@ -37,6 +38,7 @@ export type ContentToBackgroundMessage =
       type: 'CONTENT_SCAN_STATUS';
       scanEpoch: number;
       pageUrl: string;
+      pageTitle?: string;
       status: Extract<ScanStatus, 'scanning' | 'watching' | 'limit_reached'>;
     }
   | {
@@ -77,6 +79,7 @@ export type BackgroundToContentMessage =
 export interface ContentPingResponse {
   alive: true;
   pageUrl: string;
+  pageTitle?: string;
   scanEpoch: number;
 }
 

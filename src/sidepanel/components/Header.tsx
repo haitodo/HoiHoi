@@ -3,6 +3,7 @@ import type { ScanStatus } from '@shared/types';
 
 interface HeaderProps {
   domain?: string;
+  pageTitle?: string;
   itemCount: number;
   scanStatus: ScanStatus;
   statusMessage?: string;
@@ -11,6 +12,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   domain,
+  pageTitle,
   itemCount,
   scanStatus,
   statusMessage,
@@ -33,8 +35,19 @@ export const Header: React.FC<HeaderProps> = ({
     >
       <div style={{ overflow: 'hidden', marginRight: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontWeight: 600, fontSize: 13, color: '#1a1a1a' }}>
-            {domain || 'Web Image Collector'}
+          <span
+            style={{
+              fontWeight: 600,
+              fontSize: 13,
+              color: '#1a1a1a',
+              maxWidth: 180,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={pageTitle ? `${pageTitle} (${domain ?? ''})` : domain || 'Web Image Collector'}
+          >
+            {pageTitle || domain || 'Web Image Collector'}
           </span>
           <span
             style={{

@@ -20,6 +20,7 @@ export interface InternalTabSession {
   revision: number;
   pageUrl?: string;
   domain?: string;
+  pageTitle?: string;
   scanEpoch: number;
   scanStatus: ScanStatus;
   statusMessage?: string;
@@ -115,6 +116,7 @@ export class SessionStore {
       revision: snap.revision,
       pageUrl: snap.pageUrl,
       domain: snap.domain,
+      pageTitle: snap.pageTitle,
       scanEpoch: snap.scanEpoch,
       scanStatus: snap.scanStatus,
       statusMessage: snap.statusMessage,
@@ -130,7 +132,7 @@ export class SessionStore {
     });
   }
 
-  getOrCreateSession(tabId: number, pageUrl?: string): InternalTabSession {
+  getOrCreateSession(tabId: number, pageUrl?: string, pageTitle?: string): InternalTabSession {
     let session = this.sessions.get(tabId);
     if (!session) {
       let domain: string | undefined;
@@ -145,6 +147,7 @@ export class SessionStore {
         revision: 0,
         pageUrl,
         domain,
+        pageTitle,
         scanEpoch: 1,
         scanStatus: 'unscanned',
         itemCounter: 0,
@@ -159,6 +162,9 @@ export class SessionStore {
       };
       this.sessions.set(tabId, session);
       this.schedulePersist();
+    } else if (pageTitle && !session.pageTitle) {
+      session.pageTitle = pageTitle;
+      session.dirty = true;
     }
     return session;
   }
@@ -183,6 +189,7 @@ export class SessionStore {
       revision: session.revision,
       pageUrl: session.pageUrl,
       domain: session.domain,
+      pageTitle: session.pageTitle,
       scanEpoch: session.scanEpoch,
       scanStatus: session.scanStatus,
       statusMessage: session.statusMessage,
@@ -190,6 +197,16 @@ export class SessionStore {
       selectedIds: Array.from(session.selectedIds),
       downloads,
     };
+  }
+
+  updatePageTitle(tabId: number, pageTitle: string): void {
+    if (!pageTitle) return;
+    const session = this.getOrCreateSession(tabId);
+    if (session.pageTitle !== pageTitle) {
+      session.pageTitle = pageTitle;
+      session.dirty = true;
+      this.schedulePersist();
+    }
   }
 
   setScanStatus(
@@ -218,6 +235,7 @@ export class SessionStore {
     tabId: number,
     newPageUrl: string,
     initialStatus: ScanStatus = 'scanning',
+    pageTitle?: string,
   ): InternalTabSession {
     let domain: string | undefined;
     try {
@@ -227,6 +245,7 @@ export class SessionStore {
     const session = this.getOrCreateSession(tabId);
     session.pageUrl = newPageUrl;
     session.domain = domain;
+    session.pageTitle = pageTitle;
     session.scanEpoch += 1;
     session.scanStatus = initialStatus;
     session.items = [];
@@ -254,11 +273,16 @@ export class SessionStore {
     tabId: number,
     scanEpoch: number,
     groups: RawCandidateGroup[],
+    pageTitle?: string,
   ): void {
     const session = this.getOrCreateSession(tabId);
     // Keep scanEpoch synced with the latest seen
     if (scanEpoch > session.scanEpoch) {
       session.scanEpoch = scanEpoch;
+    }
+    if (pageTitle && (!session.pageTitle || session.pageTitle !== pageTitle)) {
+      session.pageTitle = pageTitle;
+      session.dirty = true;
     }
 
     const upsertedMap = new Map<string, ImageItem>();

@@ -38,6 +38,7 @@ function createScannerController(): WicScannerController {
           data: {
             alive: true,
             pageUrl: window.location.href,
+            pageTitle: document.title || undefined,
             scanEpoch: currentScanEpoch,
           },
         });

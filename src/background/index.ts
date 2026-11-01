@@ -56,11 +56,19 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 
         switch (message.type) {
           case 'CONTENT_SCAN_BATCH': {
-            sessionStore.mergeCandidateGroups(tabId, message.scanEpoch, message.groups);
+            sessionStore.mergeCandidateGroups(
+              tabId,
+              message.scanEpoch,
+              message.groups,
+              message.pageTitle,
+            );
             sendResponse({ ok: true });
             break;
           }
           case 'CONTENT_SCAN_STATUS': {
+            if (message.pageTitle) {
+              sessionStore.updatePageTitle(tabId, message.pageTitle);
+            }
             sessionStore.setScanStatus(tabId, message.status);
             sendResponse({ ok: true });
             break;
@@ -188,6 +196,8 @@ chrome.downloads.onChanged.addListener((delta) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'loading') {
     handleTabNavigation(tabId);
+  } else if (changeInfo.title) {
+    sessionStore.updatePageTitle(tabId, changeInfo.title);
   }
 });
 
