@@ -1,4 +1,5 @@
 import type { RawVideoCandidateGroup } from '@shared/types';
+import { MAX_VIDEOS_PER_TAB } from '@shared/constants';
 import {
   isKnownAdOrTrackerVideoUrl,
   isLikelyVideoUrl,
@@ -11,6 +12,7 @@ export interface NetworkMediaObserverController {
   scanBufferedEntries(): RawVideoCandidateGroup[];
   startObserving(onDiscovered: (groups: RawVideoCandidateGroup[]) => void): void;
   stopObserving(): void;
+  resetSeenUrls(): void;
 }
 
 /**
@@ -28,6 +30,7 @@ export function createNetworkMediaObserver(
     entry: PerformanceResourceTiming,
   ): RawVideoCandidateGroup | null {
     const rawUrl = entry.name;
+    if (seenUrls.size >= MAX_VIDEOS_PER_TAB) return null;
     if (!rawUrl || seenUrls.has(rawUrl)) return null;
 
     const resolved = resolveAndValidateVideoUrl(rawUrl, ctx.baseUri);
@@ -118,5 +121,6 @@ export function createNetworkMediaObserver(
       } catch {}
       perfObserver = null;
     },
+    resetSeenUrls() { seenUrls.clear(); },
   };
 }

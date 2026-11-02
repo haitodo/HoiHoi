@@ -1,5 +1,6 @@
 import {
   BLOB_DOWNLOAD_MAX_BYTES,
+  BUFFERED_VIDEO_MAX_BYTES,
   INLINE_VIDEO_BLOB_MAX_BYTES,
   MAX_CONCURRENT_DOWNLOADS,
   MAX_CONCURRENT_VIDEO_DOWNLOADS,
@@ -31,6 +32,7 @@ import { sessionStore } from './session-store';
 interface QueuedDownloadRequest {
   tabId: number;
   itemId: string;
+  panelId?: string;
 }
 
 interface ActiveHttpVideoTransfer {
@@ -56,9 +58,19 @@ export class DownloadManager {
   private activeHttpTransfers = new Map<string, ActiveHttpVideoTransfer>(); // `${tabId}:${itemId}` -> Transfer
   private isProcessing = false;
   private progressPollTimer: ReturnType<typeof setInterval> | null = null;
+  private progressSubscribers = new Set<number>();
+  private progressPolling = false;
+  private initPromise: Promise<void> | null = null;
+  private persistQueue: Promise<void> = Promise.resolve();
 
-  async init(): Promise<void> {
-    await this.hydrateAndReconcile();
+  init(): Promise<void> {
+    this.initPromise ??= sessionStore.ensureHydrated().then(() => this.hydrateAndReconcile());
+    return this.initPromise;
+  }
+
+  setProgressSubscribers(tabIds: Set<number>): void {
+    this.progressSubscribers = new Set(tabIds);
+    this.ensureProgressPolling();
   }
 
   private async hydrateAndReconcile(): Promise<void> {
@@ -68,9 +80,7 @@ export class DownloadManager {
         | Record<number, ActiveDownloadIndexEntry>
         | undefined;
 
-      if (!entries) return;
-
-      for (const [idStr, entry] of Object.entries(entries)) {
+      for (const [idStr, entry] of Object.entries(entries ?? {})) {
         const downloadId = Number(idStr);
         if (Number.isNaN(downloadId)) continue;
 
@@ -84,13 +94,31 @@ export class DownloadManager {
             this.handleDownloadComplete(downloadId, entry);
           } else if (item.state === 'interrupted') {
             this.handleDownloadInterrupted(downloadId, entry, item.error);
+          } else if (entry.refererRuleKey) {
+            await refererRuleManager.acquireDownloadRule(entry.refererRuleKey,
+              sessionStore.getSession(entry.tabId)?.pageUrl, entry.targetUrl);
           }
         } catch {
           this.activeDownloads.delete(downloadId);
         }
       }
 
-      await this.persistActiveIndex();
+      if (entries) await this.persistActiveIndex();
+      for (const tabId of sessionStore.getAllTrackedTabIds()) {
+        const session = sessionStore.getSession(tabId)!;
+        for (const download of session.downloads.values()) {
+          const tracked = Array.from(this.activeDownloads.values()).some((entry) =>
+            entry.tabId === tabId && entry.itemId === download.itemId);
+          if (download.status === 'queued' && !tracked) {
+            (isVideoItemId(download.itemId) ? this.videoQueue : this.imageQueue)
+              .push({ tabId, itemId: download.itemId, panelId: download.panelId });
+          } else if (['starting', 'in_progress'].includes(download.status) && !tracked) {
+            sessionStore.updateDownloadState(tabId, { ...download, status: 'failed',
+              errorCode: 'WORKER_RESTARTED', errorMessage: '保存処理が中断されました。再試行してください',
+              retryable: true, updatedAt: Date.now() });
+          }
+        }
+      }
       this.ensureProgressPolling();
       this.pumpQueue();
     } catch (err) {
@@ -98,7 +126,7 @@ export class DownloadManager {
     }
   }
 
-  enqueue(tabId: number, itemIds: string[]): void {
+  enqueue(tabId: number, itemIds: string[], panelId?: string): void {
     const session = sessionStore.getSession(tabId);
     if (!session) return;
 
@@ -136,6 +164,7 @@ export class DownloadManager {
         }
 
         const state: ItemDownloadState = {
+          panelId,
           itemId,
           targetUrl: video.selectedUrl,
           totalBytes: activeVariant.fileSizeBytes ?? undefined,
@@ -144,7 +173,7 @@ export class DownloadManager {
           updatedAt: Date.now(),
         };
         sessionStore.updateDownloadState(tabId, state);
-        this.videoQueue.push({ tabId, itemId });
+        this.videoQueue.push({ tabId, itemId, panelId });
       } else {
         const item = session.itemById.get(itemId);
         if (!item) continue;
@@ -224,6 +253,7 @@ export class DownloadManager {
           await chrome.downloads.cancel(downloadId);
         } catch {}
         this.cleanupObjectUrlIfNeeded(entry.revokeObjectUrl);
+        if (entry.refererRuleKey) void refererRuleManager.releaseDownloadRule(entry.refererRuleKey);
         this.activeDownloads.delete(downloadId);
         await this.persistActiveIndex();
 
@@ -283,7 +313,7 @@ export class DownloadManager {
     }
   }
 
-  retryFailed(tabId: number, itemIds?: string[], mediaMode?: MediaMode): void {
+  retryFailed(tabId: number, itemIds?: string[], mediaMode?: MediaMode, panelId?: string): void {
     const session = sessionStore.getSession(tabId);
     if (!session) return;
 
@@ -301,7 +331,7 @@ export class DownloadManager {
     }
 
     if (eligibleIds.length > 0) {
-      this.enqueue(tabId, eligibleIds);
+      this.enqueue(tabId, eligibleIds, panelId);
     }
   }
 
@@ -381,24 +411,30 @@ export class DownloadManager {
     this.isProcessing = true;
 
     // Lane 1: Image Queue (max 3 concurrent)
-    while (this.activeImageCount < MAX_CONCURRENT_DOWNLOADS && this.imageQueue.length > 0) {
+    const activeCount = (video: boolean) => Array.from(this.activeDownloads.values())
+      .filter((entry) => isVideoItemId(entry.itemId) === video).length;
+    while (this.activeImageCount + activeCount(false) < MAX_CONCURRENT_DOWNLOADS && this.imageQueue.length > 0) {
       const next = this.imageQueue.shift();
       if (!next) break;
 
       this.activeImageCount++;
-      void this.executeImageDownload(next.tabId, next.itemId).finally(() => {
+      void this.executeImageDownload(next.tabId, next.itemId).catch((error) => {
+        this.failPreparation(next, error);
+      }).finally(() => {
         this.activeImageCount--;
         this.pumpQueue();
       });
     }
 
     // Lane 2: Video Queue (max 2 concurrent, completely isolated from Image Queue)
-    while (this.activeVideoCount < MAX_CONCURRENT_VIDEO_DOWNLOADS && this.videoQueue.length > 0) {
+    while (this.activeVideoCount + activeCount(true) < MAX_CONCURRENT_VIDEO_DOWNLOADS && this.videoQueue.length > 0) {
       const next = this.videoQueue.shift();
       if (!next) break;
 
       this.activeVideoCount++;
-      void this.executeVideoDownload(next.tabId, next.itemId).finally(() => {
+      void this.executeVideoDownload(next.tabId, next.itemId, next.panelId).catch((error) => {
+        this.failPreparation(next, error);
+      }).finally(() => {
         this.activeVideoCount--;
         this.pumpQueue();
       });
@@ -407,12 +443,20 @@ export class DownloadManager {
     this.isProcessing = false;
   }
 
+  private failPreparation(request: QueuedDownloadRequest, error: unknown): void {
+    const previous = sessionStore.getSession(request.tabId)?.downloads.get(request.itemId);
+    if (!previous || previous.status === 'canceled') return;
+    sessionStore.updateDownloadState(request.tabId, { ...previous, status: 'failed',
+      errorCode: 'PREPARATION_FAILED', errorMessage: `保存の準備に失敗しました: ${String(error)}`,
+      retryable: true, updatedAt: Date.now() });
+  }
+
   private async executeImageDownload(tabId: number, itemId: string): Promise<void> {
     const session = sessionStore.getSession(tabId);
     if (!session) return;
 
     const item = session.itemById.get(itemId);
-    if (!item) return;
+    if (!item) { this.failPreparation({ tabId, itemId }, '元のページの画像候補が失効しました'); return; }
 
     const variant = item.variants.find((v) => v.url === item.selectedUrl) || item.variants[0];
     const targetUrl = item.selectedUrl;
@@ -496,12 +540,12 @@ export class DownloadManager {
     });
   }
 
-  private async executeVideoDownload(tabId: number, itemId: string): Promise<void> {
+  private async executeVideoDownload(tabId: number, itemId: string, panelId?: string): Promise<void> {
     const session = sessionStore.getSession(tabId);
     if (!session) return;
 
     const video = session.videoById.get(itemId);
-    if (!video) return;
+    if (!video) { this.failPreparation({ tabId, itemId }, '元のページの動画候補が失効しました'); return; }
 
     const variant = getActiveVideoVariant(video.variants, video.selectedUrl);
     const targetUrl = video.selectedUrl;
@@ -535,6 +579,7 @@ export class DownloadManager {
     let resolvedMimeType: string | undefined;
     let resolvedByteLength: number | undefined = variant.fileSizeBytes ?? undefined;
     let revokeObjectUrl: string | undefined;
+    let refererRuleKey: string | undefined;
 
     if (targetUrl.startsWith('blob:')) {
       const transferId = `vblob_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -546,6 +591,7 @@ export class DownloadManager {
           transferId,
           inlineMaxBytes: INLINE_VIDEO_BLOB_MAX_BYTES,
           absoluteMaxBytes: VIDEO_BLOB_MAX_BYTES,
+          recipientPanelId: panelId,
         })) as MessageResult<VideoBlobPrepareResponse>;
 
         if (!response.ok) {
@@ -572,6 +618,7 @@ export class DownloadManager {
           const rpcMsg: PanelInternalRequestMessage = {
             channel: 'WIC_BG_TO_PANEL_RPC',
             type: 'PANEL_CREATE_OBJECT_URL_FROM_TRANSFER',
+          recipientPanelId: panelId,
             transferId,
           };
           const panelRes = (await chrome.runtime.sendMessage(rpcMsg)) as MessageResult<string>;
@@ -642,11 +689,12 @@ export class DownloadManager {
         const rpcMsg: PanelInternalRequestMessage = {
           channel: 'WIC_BG_TO_PANEL_RPC',
           type: 'PANEL_FETCH_HTTP_VIDEO_TO_OBJECT_URL',
+          recipientPanelId: panelId,
           tabId,
           itemId,
           transferId,
           url: targetUrl,
-          maxBytes: VIDEO_BLOB_MAX_BYTES,
+          maxBytes: BUFFERED_VIDEO_MAX_BYTES,
         };
         const panelRes = (await chrome.runtime.sendMessage(rpcMsg)) as
           | MessageResult<HttpVideoFetchResponse>
@@ -704,16 +752,18 @@ export class DownloadManager {
             downloadableUrl = panelRes.data.objectUrl;
             revokeObjectUrl = panelRes.data.objectUrl;
           } else {
-            // > 1 GB direct fallback
+            // Large files go directly to Chrome rather than accumulating in the panel.
             downloadableUrl = panelRes.data.finalUrl || targetUrl;
           }
         }
+        if (!revokeObjectUrl) refererRuleKey = transferKey;
       } catch {
         // Side Panel view unavailable/closed -> fall back cleanly to direct chrome.downloads
         if (transferEntry.canceled) return;
+        refererRuleKey = transferKey;
       } finally {
         this.activeHttpTransfers.delete(transferKey);
-        await refererRuleManager.releaseDownloadRule(transferKey);
+        if (!refererRuleKey) await refererRuleManager.releaseDownloadRule(transferKey);
       }
     }
 
@@ -743,6 +793,7 @@ export class DownloadManager {
       filename,
       totalBytes: resolvedByteLength,
       revokeObjectUrl,
+      refererRuleKey,
     });
   }
 
@@ -754,6 +805,7 @@ export class DownloadManager {
     filename: string;
     totalBytes?: number;
     revokeObjectUrl?: string;
+    refererRuleKey?: string;
   }): Promise<void> {
     const {
       tabId,
@@ -763,6 +815,7 @@ export class DownloadManager {
       filename,
       totalBytes,
       revokeObjectUrl,
+      refererRuleKey,
     } = params;
 
     try {
@@ -780,10 +833,13 @@ export class DownloadManager {
         targetUrl,
         startedAt: Date.now(),
         revokeObjectUrl,
+        refererRuleKey,
       };
 
       this.activeDownloads.set(downloadId, entry);
       await this.persistActiveIndex();
+      // Small/cached downloads can finish while the critical index write is pending.
+      if (!this.activeDownloads.has(downloadId)) return;
 
       sessionStore.updateDownloadState(tabId, {
         itemId,
@@ -800,6 +856,7 @@ export class DownloadManager {
       this.ensureProgressPolling();
     } catch (err) {
       this.cleanupObjectUrlIfNeeded(revokeObjectUrl);
+      if (refererRuleKey) void refererRuleManager.releaseDownloadRule(refererRuleKey);
       sessionStore.updateDownloadState(tabId, {
         itemId,
         targetUrl,
@@ -833,6 +890,7 @@ export class DownloadManager {
     entry: ActiveDownloadIndexEntry,
   ): void {
     this.cleanupObjectUrlIfNeeded(entry.revokeObjectUrl);
+    if (entry.refererRuleKey) void refererRuleManager.releaseDownloadRule(entry.refererRuleKey);
     this.activeDownloads.delete(downloadId);
     void this.persistActiveIndex();
 
@@ -852,6 +910,7 @@ export class DownloadManager {
     rawError?: string,
   ): void {
     this.cleanupObjectUrlIfNeeded(entry.revokeObjectUrl);
+    if (entry.refererRuleKey) void refererRuleManager.releaseDownloadRule(entry.refererRuleKey);
     this.activeDownloads.delete(downloadId);
     void this.persistActiveIndex();
 
@@ -885,7 +944,7 @@ export class DownloadManager {
   private ensureProgressPolling(): void {
     let hasActiveVideo = false;
     for (const entry of this.activeDownloads.values()) {
-      if (isVideoItemId(entry.itemId)) {
+      if (isVideoItemId(entry.itemId) && this.progressSubscribers.has(entry.tabId)) {
         hasActiveVideo = true;
         break;
       }
@@ -902,55 +961,66 @@ export class DownloadManager {
   }
 
   private async pollVideoDownloadProgress(): Promise<void> {
-    if (this.activeDownloads.size === 0) {
-      this.ensureProgressPolling();
-      return;
-    }
-
-    const updatesByTab = new Map<
-      number,
-      Array<{ itemId: string; bytesReceived: number; totalBytes?: number }>
-    >();
-
-    for (const [downloadId, entry] of this.activeDownloads.entries()) {
-      if (!isVideoItemId(entry.itemId)) continue;
-      try {
-        const items = await chrome.downloads.search({ id: downloadId });
-        const dl = items[0];
-        if (!dl || dl.state !== 'in_progress') continue;
-
-        let list = updatesByTab.get(entry.tabId);
-        if (!list) {
-          list = [];
-          updatesByTab.set(entry.tabId, list);
-        }
-        list.push({
-          itemId: entry.itemId,
-          bytesReceived: dl.bytesReceived,
-          totalBytes: dl.totalBytes > 0 ? dl.totalBytes : undefined,
-        });
-      } catch {
-        // Ignore transient search error
+    if (this.progressPolling) return;
+    this.progressPolling = true;
+    try {
+      if (this.activeDownloads.size === 0) {
+        this.ensureProgressPolling();
+        return;
       }
-    }
 
-    for (const [tabId, updates] of updatesByTab.entries()) {
-      sessionStore.emitDownloadProgress(tabId, updates);
+      const updatesByTab = new Map<
+        number,
+        Array<{ itemId: string; bytesReceived: number; totalBytes?: number }>
+      >();
+
+      for (const [downloadId, entry] of this.activeDownloads.entries()) {
+        if (!isVideoItemId(entry.itemId) || !this.progressSubscribers.has(entry.tabId)) continue;
+        try {
+          const items = await chrome.downloads.search({ id: downloadId });
+          const dl = items[0];
+          if (!dl) continue;
+          if (dl.state === 'complete' || dl.state === 'interrupted') {
+            this.handleDownloadDelta({
+              id: downloadId, state: { current: dl.state },
+              error: dl.error ? { current: dl.error } : undefined
+            });
+            continue;
+          }
+
+          let list = updatesByTab.get(entry.tabId);
+          if (!list) {
+            list = [];
+            updatesByTab.set(entry.tabId, list);
+          }
+          list.push({
+            itemId: entry.itemId,
+            bytesReceived: dl.bytesReceived,
+            totalBytes: dl.totalBytes > 0 ? dl.totalBytes : undefined,
+          });
+        } catch {
+          // Ignore transient search error
+        }
+      }
+
+      for (const [tabId, updates] of updatesByTab.entries()) {
+        sessionStore.emitDownloadProgress(tabId, updates);
+      }
+    } finally {
+      this.progressPolling = false;
     }
   }
 
   private async persistActiveIndex(): Promise<void> {
-    const record: Record<number, ActiveDownloadIndexEntry> = {};
-    for (const [id, entry] of this.activeDownloads) {
-      record[id] = entry;
-    }
-    try {
-      await chrome.storage.session.set({
-        [STORAGE_KEYS.ACTIVE_DOWNLOAD_INDEX]: record,
-      });
-    } catch (err) {
-      console.warn('[WIC] Failed to persist active download index:', err);
-    }
+    this.persistQueue = this.persistQueue.catch(() => { }).then(async () => {
+      const record = Object.fromEntries(this.activeDownloads);
+      try {
+        await chrome.storage.session.set({ [STORAGE_KEYS.ACTIVE_DOWNLOAD_INDEX]: record });
+      } catch (err) {
+        console.warn('[WIC] Failed to persist active download index:', err);
+      }
+    });
+    await this.persistQueue;
   }
 }
 

@@ -20,6 +20,7 @@ import {
   resolveAndValidateVideoUrl,
 } from '@shared/video-utils';
 import type { ExtractorContext } from './dom-extractor';
+import { registerLargeDataUrl } from './large-data-store';
 
 export interface PageFallbackVideoMeta {
   posterUrl?: string;
@@ -27,7 +28,7 @@ export interface PageFallbackVideoMeta {
 }
 
 const MAX_POSTER_SNAPSHOT_EDGE_PX = 280;
-const MAX_SCRIPT_SCAN_CHARS = 512_000;
+const MAX_SCRIPT_SCAN_CHARS = 64_000;
 const MAX_SCRIPT_EXTRACTED_URLS = 30;
 
 function getOrAssignElementId(el: Element, ctx: ExtractorContext): number {
@@ -125,8 +126,8 @@ function registerVideoVariant(
   let largeDataRefId: string | undefined;
 
   if (url.startsWith('data:') && url.length > INLINE_DATA_URL_SESSION_MAX_CHARS) {
-    largeDataRefId = `vdata_ref_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    ctx.largeDataUrlStore.set(largeDataRefId, url);
+    largeDataRefId = registerLargeDataUrl(ctx.largeDataUrlStore, url);
+    if (!largeDataRefId) throw new Error('WIC_DATA_CACHE_LIMIT');
     const commaIdx = url.indexOf(',');
     const header = commaIdx > 0 ? url.slice(0, commaIdx + 1) : 'data:video/mp4;base64,';
     storedUrl = `${header}__WIC_LARGE_DATA_${largeDataRefId}__`;
@@ -482,11 +483,10 @@ export function extractPageFallbackVideoMeta(
  * Layer 2: Passively extracts video URLs, posters, dimensions, and ISO-8601 durations from
  * OpenGraph `<meta>` tags and `<script type="application/ld+json">` `VideoObject` entries.
  */
-export function extractPageMetadataVideos(
+export function* iteratePageMetadataVideos(
   doc: Document,
   ctx: ExtractorContext,
-): RawVideoCandidateGroup[] {
-  const groups: RawVideoCandidateGroup[] = [];
+): Generator<RawVideoCandidateGroup | undefined> {
   const baseUri = doc.baseURI || ctx.baseUri;
 
   // 1. OpenGraph & Twitter stream meta tags
@@ -515,6 +515,7 @@ export function extractPageMetadataVideos(
   for (const sel of metaSelectors) {
     const metas = doc.querySelectorAll(sel);
     for (let i = 0; i < metas.length; i++) {
+      yield undefined;
       const content = metas[i]?.getAttribute('content');
       if (!content) continue;
       const resolved = resolveAndValidateVideoUrl(content, baseUri);
@@ -525,7 +526,7 @@ export function extractPageMetadataVideos(
         !metaUrls.has(resolved)
       ) {
         metaUrls.add(resolved);
-        groups.push({
+        yield {
           occurrenceKey: `meta::ogp::${resolved}`,
           primaryUrl: resolved,
           domOrder: ctx.domOrderCounter(),
@@ -542,7 +543,7 @@ export function extractPageMetadataVideos(
               { mimeHint: ogTypeHint },
             ),
           ],
-        });
+        };
       }
     }
   }
@@ -550,8 +551,9 @@ export function extractPageMetadataVideos(
   // 2. JSON-LD VideoObject structured data
   const ldScripts = doc.querySelectorAll('script[type="application/ld+json"]');
   for (let i = 0; i < ldScripts.length; i++) {
+    yield undefined;
     const rawJson = ldScripts[i]?.textContent?.trim();
-    if (!rawJson || !rawJson.includes('VideoObject')) continue;
+    if (!rawJson || rawJson.length > 128_000 || !rawJson.includes('VideoObject')) continue;
 
     try {
       const parsed: unknown = JSON.parse(rawJson);
@@ -559,6 +561,7 @@ export function extractPageMetadataVideos(
       collectJsonLdVideoObjects(parsed, videoObjects);
 
       for (const vo of videoObjects) {
+        yield undefined;
         const rawContentUrl = typeof vo.contentUrl === 'string' ? vo.contentUrl : undefined;
         if (!rawContentUrl) continue;
 
@@ -583,7 +586,7 @@ export function extractPageMetadataVideos(
         const width = parseDimensionValue(vo.width);
         const height = parseDimensionValue(vo.height);
 
-        groups.push({
+        yield {
           occurrenceKey: `meta::jsonld::${resolvedUrl}`,
           primaryUrl: resolvedUrl,
           domOrder: ctx.domOrderCounter(),
@@ -594,14 +597,18 @@ export function extractPageMetadataVideos(
               mimeHint: encodingFormat,
             }),
           ],
-        });
+        };
       }
     } catch {
       // Ignore malformed JSON-LD blocks on page
     }
   }
 
-  return groups;
+}
+
+export function extractPageMetadataVideos(doc: Document, ctx: ExtractorContext): RawVideoCandidateGroup[] {
+  return Array.from(iteratePageMetadataVideos(doc, ctx))
+    .filter((group): group is RawVideoCandidateGroup => group !== undefined);
 }
 
 const QUICK_VIDEO_TOKEN_RE = /(?:\.mp4|\.m3u8|\.webm|\.mov|\.m4v|\.mpd)\b/i;
@@ -643,12 +650,11 @@ function collectValidEmbeddedVideoUrls(text: string, baseUri: string, out: strin
  * attributes for embedded `.mp4` / `.m3u8` / `.webm` URLs (including JSON-escaped `https:\/\/...`).
  * Zero network requests and zero polling.
  */
-export function extractEmbeddedScriptAndConfigVideos(
+export function* iterateEmbeddedScriptAndConfigVideos(
   doc: Document,
   ctx: ExtractorContext,
   pageFallbackMeta?: PageFallbackVideoMeta,
-): RawVideoCandidateGroup[] {
-  const groups: RawVideoCandidateGroup[] = [];
+): Generator<RawVideoCandidateGroup | undefined> {
   const baseUri = doc.baseURI || ctx.baseUri;
   const seenUrls = new Set<string>();
 
@@ -658,6 +664,7 @@ export function extractEmbeddedScriptAndConfigVideos(
     '[data-setup], [data-config], [data-options], [data-player], [flashvars]',
   );
   for (let i = 0; i < configEls.length; i++) {
+    yield undefined;
     const el = configEls[i]!;
     const elUrls: string[] = [];
     for (const attr of configAttrs) {
@@ -683,13 +690,13 @@ export function extractEmbeddedScriptAndConfigVideos(
           { descriptor: hint?.descriptor },
         );
       });
-      groups.push({
+      yield {
         occurrenceKey: `el_${elId}::config-embed::${variants[0]!.url}`,
         primaryUrl: variants[0]!.url,
         domOrder: ctx.domOrderCounter(),
         durationSec: null,
         variants,
-      });
+      };
     }
   }
 
@@ -698,10 +705,11 @@ export function extractEmbeddedScriptAndConfigVideos(
   // player configurations (e.g. 1080p, 720p, 480p) form variants of ONE card rather than separate duplicate cards.
   const inlineScripts = doc.querySelectorAll('script:not([src])');
   for (let i = 0; i < inlineScripts.length; i++) {
+    yield undefined;
     const scriptEl = inlineScripts[i]!;
     const scriptType = (scriptEl.getAttribute('type') || '').toLowerCase();
     if (scriptType === 'application/ld+json') continue;
-    const content = scriptEl.textContent;
+    const content = scriptEl.textContent?.slice(0, MAX_SCRIPT_SCAN_CHARS);
     if (!content) continue;
 
     const blockUrls: string[] = [];
@@ -737,17 +745,23 @@ export function extractEmbeddedScriptAndConfigVideos(
     });
 
     const primaryUrl = variants[0]!.url;
-    groups.push({
+    yield {
       occurrenceKey: `script_${scriptElId}::embed::${primaryUrl}`,
       primaryUrl,
       domOrder: ctx.domOrderCounter(),
       durationSec: newUrls.length === 1 ? (pageFallbackMeta?.durationSec ?? null) : null,
       posterUrl: newUrls.length === 1 ? pageFallbackMeta?.posterUrl : undefined,
       variants,
-    });
+    };
   }
 
-  return groups;
+}
+
+export function extractEmbeddedScriptAndConfigVideos(
+  doc: Document, ctx: ExtractorContext, pageFallbackMeta?: PageFallbackVideoMeta,
+): RawVideoCandidateGroup[] {
+  return Array.from(iterateEmbeddedScriptAndConfigVideos(doc, ctx, pageFallbackMeta))
+    .filter((group): group is RawVideoCandidateGroup => group !== undefined);
 }
 
 function collectJsonLdVideoObjects(

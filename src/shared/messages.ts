@@ -94,6 +94,7 @@ export type BackgroundToContentMessage =
       transferId: string;
       inlineMaxBytes: number;
       absoluteMaxBytes: number;
+      recipientPanelId?: string;
     }
   | {
       channel: 'WIC_BG_TO_CONTENT';
@@ -109,12 +110,24 @@ export type BackgroundToContentMessage =
   | {
       channel: 'WIC_BG_TO_CONTENT';
       type: 'BG_STOP_SCANNER';
+      releaseData?: boolean;
     };
 
 export interface ContentPingResponse {
   alive: true;
   pageUrl: string;
   pageTitle?: string;
+  scanEpoch: number;
+}
+
+/** Event-driven subscriptions. Neither connection sends idle heartbeat messages. */
+export interface PanelWatchMessage {
+  type: 'PANEL_WATCH_TAB';
+  tabId: number | null;
+}
+
+export interface ScannerWatchMessage {
+  type: 'SCANNER_WATCH';
   scanEpoch: number;
 }
 
@@ -143,6 +156,12 @@ export type VideoBlobPrepareResponse =
 // ============================================================================
 
 export type BlobStreamPortMessage =
+  | {
+      type: 'BLOB_STREAM_ACK';
+      transferId: string;
+      /** -1 = initialized, -2 = completed; otherwise acknowledged chunk index. */
+      index: number;
+    }
   | {
       type: 'BLOB_STREAM_INIT';
       transferId: string;
@@ -182,7 +201,9 @@ export type HttpVideoFetchResponse =
       contentDisposition?: string;
     };
 
-export type PanelInternalRequestMessage =
+export type PanelInternalRequestMessage = PanelInternalCommand & { recipientPanelId?: string };
+
+type PanelInternalCommand =
   | {
       channel: 'WIC_BG_TO_PANEL_RPC';
       type: 'PANEL_CREATE_OBJECT_URL_FROM_TRANSFER';
@@ -218,7 +239,9 @@ export type SelectionMutation =
   | { mode: 'remove_many'; itemIds: string[] } // Optional partial deselect
   | { mode: 'clear_all' };                     // Used for "全解除" (clears hidden selections in active mode)
 
-export type PanelToBackgroundMessage =
+export type PanelToBackgroundMessage = PanelCommand & { panelId?: string };
+
+type PanelCommand =
   | {
       channel: 'WIC_PANEL_TO_BG';
       type: 'PANEL_GET_TAB_SESSION';

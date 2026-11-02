@@ -223,14 +223,21 @@ sequenceDiagram
 ## 6. コア設計3：非ブロッキング段階スキャン & 冪等 Content Script（§6.5, §8.3, §9）
 
 1. **チャンク分割走査 (`src/content/chunk-runner.ts`)**:
-   - 初回・再スキャン時は `document.querySelectorAll('*')` のスナップショット配列（または `TreeWalker`）を取得し、`performance.now() - sliceStart >= SCAN_CHUNK_BUDGET_MS`（`8ms`）に達するごとに中断して `setTimeout(nextSlice, 0)` でメインスレッドを解放する（※ バックグラウンドタブでも止まらないよう `requestAnimationFrame` は使わない）。
+   - 初回・再スキャン時は `TreeWalker` を1ノードずつ進め、Open Shadow DOM、メタデータ、埋め込みスクリプト解析も同じランナーへ流す。`performance.now() - sliceStart >= SCAN_CHUNK_BUDGET_MS`（`8ms`）で中断し、`setTimeout(nextSlice, 0)` でメインスレッドを解放する。文書全体の配列スナップショットは作らない。
    - iframe 内ドキュメントおよび `::before` / `::after` 疑似要素は走査しない（`spec.md` §6.2）。
 2. **バッチフラッシュと上限保護**:
    - 抽出した `RawCandidateGroup` はバッファに溜め、`SCAN_BATCH_MAX_SIZE`（`40件`）到達または `SCAN_BATCH_INTERVAL_MS`（`50ms`）経過で `CONTENT_SCAN_BATCH` を送信する。
+   - 未応答のバッチは最大2件。応答待ち中は走査を休止し、応答イベントで再開する。待機中のポーリングは行わない。同一候補の再送も抑制する。
    - Background 側で `items.length >= MAX_ITEMS_PER_TAB`（`2,000件`）に達した場合は新規アイテム追加を打ち切り、`scanStatus = 'limit_reached'` を通知する。
 3. **動的追加監視 (`MutationObserver`)**:
    - `observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: OBSERVED_MUTATION_ATTRIBUTES as string[] })` で監視する。
-   - 変更された要素（`addedNodes` の要素本体と子孫要素、`attributes` 変更の `target` 要素）を `Set<Element>` に蓄積し、`MUTATION_DEBOUNCE_MS`（`150ms`）デバウンス後に同じ `8ms` タイムスライスランナーへ流す。自動スクロールは一切行わない（MVP-05）。
+   - Observerのコールバックでは追加ノードの根と関連属性の変更対象のみを蓄積する。子孫走査は `150ms` の固定集約窓の後にランナーへ渡す。無関係なstyleアニメーションは無視し、連続変更でも処理が無期限に延期されない。待機ノードは4,000件までとし、溢れた場合は分割した全体走査へ集約する。
+
+4. **監視の寿命とタブの限定**:
+   - `usePanelActivity` が表示中パネルの対象だけを購読する。未スキャンのタブへの切替ではスキャンしない。ピン留め中はその対象を維持する。
+   - パネルからContent Scriptへ直接接続した `SCANNER_LIFECYCLE` Portの最後の購読が切れたら、DOM/Performance Observer、ページイベント、待機タイマーを停止する。SWの寿命には依存しない。
+   - Backgroundの `PanelSubscriptions` はウィンドウごとの購読を集約し、`webRequest` を対象タブの `tabId` フィルターで登録する。SW再起動時にはパネルがイベントで再購読し、最新Snapshotを受け取る。常時heartbeatは使用しない。
+   - タイトル変更は購読中の既存セッションだけを更新する。無関係なタブの参照・タイトル変更でセッションを作成しない。
 
 ---
 
@@ -238,10 +245,10 @@ sequenceDiagram
 
 ### 7.1 Service Worker 状態復元と直列永続化 (`src/background/session-store.ts`)
 
-- **Hydration ゲート**: `SessionStore` は初回アクセス時に `hydratePromise` を1度だけ実行し、`chrome.storage.session` から全アクティブデータをメモリ `Map` に復元する。すべてのメッセージハンドラ・イベントハンドラは冒頭で `await sessionStore.ensureHydrated()` を呼ぶ。
+- **Hydration ゲート**: セッションが必要な操作で `hydratePromise` を1度だけ実行する。保存済みデータを復元し、存在しないタブのキャッシュを削除する。無関係なタブのイベントでは復元しない。
 - **Write Coalescing（競合防止）**:
   - 状態変更はすべて同期的にインメモリ `Map` を更新し、`revision` をインクリメントする。
-  - `chrome.storage.session.set` への永続化は、タブ単位のダーティフラグを立てて `SESSION_PERSIST_DEBOUNCE_MS`（`100ms`）でまとめ書きし、かつ Promise チェーンで**1つずつ直列実行**する。ただしダウンロード開始（`ACTIVE_DOWNLOAD_INDEX` 更新）時のみデバウンスせず即時直列フラッシュする（直後に SW が強制終了しても `downloadId` 逆引きを絶対に失わないため）。
+  - 通常の保存はダーティフラグを立てて `750ms` の固定窓でまとめ、Promiseチェーンで直列実行する。同一候補・同一状態では更新しない。失敗した変更はダーティ状態を保持し、次の変更または明示flushで再試行する。パネルの最後の購読解除でもflushする。ダウンロードの重要インデックスは即時直列保存する。
 
 ### 7.2 `chrome.storage.session` 10MB クォータ保護戦略
 
@@ -250,6 +257,8 @@ sequenceDiagram
 2. **巨大 `data:` URL の退避**:
    - Content Script は `url.startsWith('data:') && url.length > INLINE_DATA_URL_SESSION_MAX_CHARS`（`32,768` 文字）の候補を検出した際、Content Script 内の `largeDataUrlStore: Map<string, string>` に全文を保持し、Background へ送る際は先頭MIMEヘッダ情報＋ハッシュ識別子（`largeDataRefId`）と短縮サムネイル用参照（または32KB以下の場合のみ全文）を付与する。
    - 万一 `chrome.storage.session.set` が `QUOTA_BYTES` エラーを投げた場合でも、メモリ上のセッションは維持しつつ古い非アクティブタブのキャッシュから順に `storage.session.remove` してリトライし、拡張機能全体が停止しないようにする。
+   - 通常キャッシュは8タブ・保存Snapshotの推定6MiBを目安にLRU削除する。表示対象と実行中/待機中ダウンロードは保護する。候補メタデータはタブあたり推定2MiBで新規追加を制限し、候補数・派生URL・出現キーにも上限を設ける。捕捉フレームのData URLは永続Snapshotから除外する。
+   - ページ内の巨大Data URLは合計16MiBまで保持し、同一URLに同じ参照を再利用する。参照を維持するため、単なる一時停止では保持し、セッションの退避またはページ破棄で解放する。
 
 ### 7.3 ダウンロードキューと状態遷移 (`src/background/download-manager.ts`)
 

@@ -305,14 +305,14 @@ describe('SessionStore', () => {
     };
 
     const sniffer = new NetworkVideoSniffer(store);
-    sniffer.startSniffing();
+    sniffer.setWatchedTabs([301, 302]);
     expect(sniffer.isSniffing()).toBe(true);
 
     // Case 1: SD-only TokyoMotion video -> resolves to direct www47 .mp4 CDN URL
     const sdTabId = 301;
     store.resetSessionForNewPage(
       sdTabId,
-      'https://www.tokyomotion.net/video/3741005/test',
+      'https://www.tokyomotion.net/video/1234567/test',
       'watching',
       'Test Video',
     );
@@ -322,13 +322,13 @@ describe('SessionStore', () => {
       [
         {
           occurrenceKey: 'el_1::video::sd',
-          primaryUrl: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+          primaryUrl: 'https://www.tokyomotion.net/vsrc/sd/test-sd-source',
           domOrder: 1,
           durationSec: 285.05,
-          posterUrl: 'https://cdn.tokyomotion.net/thumbs/3741005.jpg',
+          posterUrl: 'https://cdn.tokyomotion.net/thumbs/1234567.jpg',
           variants: [
             {
-              url: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+              url: 'https://www.tokyomotion.net/vsrc/sd/test-sd-source',
               role: 'source-tag',
               source: 'video-source',
               descriptor: 'SD',
@@ -339,15 +339,15 @@ describe('SessionStore', () => {
           ],
         },
       ],
-      'https://www.tokyomotion.net/video/3741005/test',
+      'https://www.tokyomotion.net/video/1234567/test',
     );
 
     const resolvedSdCdnUrl =
-      'https://www47.tokyomotion.net/video/5bef0447760e69bf70c8ff816085f40d/6ae73a89/iphone/3741005.mp4?md5=LBd_l-x41sPt-IllUbwDeg&expires=1793542297';
+      'https://www47.tokyomotion.net/video/test-cdn-path/test-session/iphone/1234567.mp4?md5=test&expires=2000000000';
 
     redirectListener?.({
       tabId: sdTabId,
-      url: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+      url: 'https://www.tokyomotion.net/vsrc/sd/test-sd-source',
       redirectUrl: resolvedSdCdnUrl,
       statusCode: 301,
     } as chrome.webRequest.WebRedirectionResponseDetails);
@@ -373,7 +373,7 @@ describe('SessionStore', () => {
     const hdTabId = 302;
     store.resetSessionForNewPage(
       hdTabId,
-      'https://www.tokyomotion.net/video/7156341/hd-test',
+      'https://www.tokyomotion.net/video/7654321/hd-test',
       'watching',
       'HD Video',
     );
@@ -408,19 +408,19 @@ describe('SessionStore', () => {
           ],
         },
       ],
-      'https://www.tokyomotion.net/video/7156341/hd-test',
+      'https://www.tokyomotion.net/video/7654321/hd-test',
     );
 
     redirectListener?.({
       tabId: hdTabId,
       url: 'https://www.tokyomotion.net/vsrc/sd/111111',
-      redirectUrl: 'https://www47.tokyomotion.net/video/abc/iphone/7156341.mp4?md5=xyz',
+      redirectUrl: 'https://www47.tokyomotion.net/video/abc/iphone/7654321.mp4?md5=test',
       statusCode: 301,
     } as chrome.webRequest.WebRedirectionResponseDetails);
 
     headersListener?.({
       tabId: hdTabId,
-      url: 'https://www47.tokyomotion.net/video/abc/iphone/7156341.mp4?md5=xyz',
+      url: 'https://www47.tokyomotion.net/video/abc/iphone/7654321.mp4?md5=test',
       statusCode: 206,
       responseHeaders: [
         { name: 'content-type', value: 'video/mp4' },
@@ -439,12 +439,12 @@ describe('SessionStore', () => {
     expect(headersListener).toBeUndefined();
 
     // Verify Referer / requestDomains helper scopes subdomains cleanly
-    expect(extractRequestDomainScope('https://www47.tokyomotion.net/video/3741005.mp4')).toBe(
+    expect(extractRequestDomainScope('https://www47.tokyomotion.net/video/1234567.mp4')).toBe(
       'tokyomotion.net',
     );
     expect(extractRequestDomainScope('https://media.example.co.jp/watch/1')).toBe('example.co.jp');
-    expect(parseHttpRefererAndOrigin('https://www.tokyomotion.net/video/3741005/a')).toEqual({
-      referer: 'https://www.tokyomotion.net/video/3741005/a',
+    expect(parseHttpRefererAndOrigin('https://www.tokyomotion.net/video/1234567/a')).toEqual({
+      referer: 'https://www.tokyomotion.net/video/1234567/a',
       origin: 'https://www.tokyomotion.net',
     });
   });

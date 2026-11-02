@@ -1,7 +1,9 @@
 import { VIDEO_BLOB_MAX_BYTES } from '@shared/constants';
 import type { MessageResult } from '@shared/messages';
 import { parseHlsMediaPlaylist } from '@shared/video-utils';
+import { readTextLimited } from '@shared/response-utils';
 import { registerSidePanelObjectUrl } from '../hooks/useBlobStreamBridge';
+import { createMediaBuffer } from './media-buffer';
 
 export interface HlsStreamMergeProgress {
   completedSegments: number;
@@ -17,7 +19,6 @@ export interface AssembledHlsVodResult {
 }
 
 const MAX_HLS_VOD_SEGMENTS = 800;
-const SEGMENT_FETCH_CONCURRENCY = 3;
 
 async function fetchManifestText(
   tabId: number,
@@ -50,8 +51,7 @@ async function fetchManifestText(
   if (!resp.ok) {
     throw new Error(`プレイリストの取得に失敗しました (HTTP ${resp.status})`);
   }
-  const text = await resp.text();
-  return text.slice(0, 512_000);
+  return readTextLimited(resp, 512_000);
 }
 
 /**
@@ -107,21 +107,19 @@ export async function downloadAndAssembleHlsVod(options: {
     : [...parsed.segmentUrls];
 
   const totalSegments = orderedUrls.length;
-  const buffers = new Array<ArrayBuffer>(totalSegments);
-  let nextIndex = 0;
+  const sink = await createMediaBuffer(VIDEO_BLOB_MAX_BYTES);
   let completedSegments = 0;
   let bytesReceived = 0;
 
   onProgress?.({ completedSegments: 0, totalSegments, bytesReceived: 0 });
 
-  const workerCount = Math.min(SEGMENT_FETCH_CONCURRENCY, totalSegments);
-  const runWorker = async (): Promise<void> => {
-    while (nextIndex < totalSegments) {
+  try {
+    // Stream segments in order; JS retains only the current network chunk.
+    for (let currentIdx = 0; currentIdx < totalSegments; currentIdx++) {
       if (signal.aborted) {
         throw new DOMException('Aborted', 'AbortError');
       }
 
-      const currentIdx = nextIndex++;
       const segUrl = orderedUrls[currentIdx];
       if (!segUrl) continue;
 
@@ -132,16 +130,20 @@ export async function downloadAndAssembleHlsVod(options: {
         );
       }
 
-      const buffer = await resp.arrayBuffer();
-      bytesReceived += buffer.byteLength;
-
-      if (bytesReceived > VIDEO_BLOB_MAX_BYTES) {
-        throw new Error(
-          '結合データの合計サイズが上限（1GB）を超えました。yt-dlp コマンドをご利用ください',
-        );
+      const reader = resp.body?.getReader();
+      if (!reader) throw new Error('動画データのストリーミング取得に対応していません');
+      try {
+        while (true) {
+          if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+          const { done, value } = await reader.read();
+          if (done) break;
+          await sink.write(value);
+          bytesReceived += value.byteLength;
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
       }
-
-      buffers[currentIdx] = buffer;
       completedSegments += 1;
 
       onProgress?.({
@@ -150,24 +152,18 @@ export async function downloadAndAssembleHlsVod(options: {
         bytesReceived,
       });
     }
-  };
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    const result = await sink.finish(parsed.mimeType);
+    registerSidePanelObjectUrl(result.objectUrl, result.dispose);
 
-  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
-
-  if (signal.aborted) {
-    throw new DOMException('Aborted', 'AbortError');
+    return {
+      objectUrl: result.objectUrl,
+      containerExtension: parsed.containerExtension,
+      totalBytes: bytesReceived,
+      resolvedManifestUrl: activeManifestUrl,
+    };
+  } catch (error) {
+    await sink.abort();
+    throw error;
   }
-
-  const assembledBlob = new Blob(buffers, { type: parsed.mimeType });
-  buffers.length = 0;
-
-  const objectUrl = URL.createObjectURL(assembledBlob);
-  registerSidePanelObjectUrl(objectUrl);
-
-  return {
-    objectUrl,
-    containerExtension: parsed.containerExtension,
-    totalBytes: bytesReceived,
-    resolvedManifestUrl: activeManifestUrl,
-  };
 }

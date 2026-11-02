@@ -30,8 +30,18 @@ export const SCAN_BATCH_INTERVAL_MS = 50;
 /** Debounce/throttle interval (ms) for MutationObserver incremental scans (`spec.md` §6.5). */
 export const MUTATION_DEBOUNCE_MS = 150;
 
-/** Debounce interval (ms) for coalescing non-critical `chrome.storage.session` writes in Background SW. */
-export const SESSION_PERSIST_DEBOUNCE_MS = 100;
+/** Fixed coalescing window; sustained changes cannot starve persistence and idle work never repeats. */
+export const SESSION_PERSIST_DEBOUNCE_MS = 750;
+
+/** Cache budgets exclude active downloads; no periodic eviction/cleanup timer is needed. */
+export const MAX_CACHED_TAB_SESSIONS = 8;
+export const SESSION_CACHE_BUDGET_BYTES = 6 * 1024 * 1024;
+export const MAX_SESSION_PAYLOAD_BYTES = 2 * 1024 * 1024;
+export const MAX_VARIANTS_PER_ITEM = 32;
+export const MAX_OCCURRENCE_KEYS_PER_TAB = 20_000;
+export const LARGE_DATA_CACHE_MAX_BYTES = 16 * 1024 * 1024;
+export const MAX_PENDING_SCAN_NODES = 4_000;
+export const BUFFERED_VIDEO_MAX_BYTES = 64 * 1024 * 1024;
 
 /**
  * Maximum character length of a `data:` URL stored inline inside `chrome.storage.session`.
@@ -191,6 +201,7 @@ export const RESTRICTED_VIDEO_DOMAINS = new Set([
 /** Port channel names used for long-lived connections and large blob streaming. */
 export const PORT_NAMES = {
   SIDEPANEL_LIFECYCLE: 'hoihoi-sidepanel',
+  SCANNER_LIFECYCLE: 'hoihoi-scanner-watch',
   BLOB_STREAM: 'hoihoi-blob-stream',
 } as const;
 

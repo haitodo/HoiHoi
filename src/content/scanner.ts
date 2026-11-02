@@ -5,6 +5,9 @@ import {
   readBlobAsDataUrl,
 } from './blob-reader';
 import { createChunkRunner, type ChunkRunnerController } from './chunk-runner';
+import { PORT_NAMES } from '@shared/constants';
+import type { ScannerWatchMessage } from '@shared/messages';
+import { LargeDataStore } from './large-data-store';
 
 /**
  * Robust Content Script (`dist/content/scanner.js`)
@@ -33,14 +36,24 @@ function isExtensionContextValid(): boolean {
 
 function createScannerController(): WicScannerController {
   let currentScanEpoch = 1;
-  const largeDataUrlStore = new Map<string, string>();
+  const largeDataUrlStore = new LargeDataStore();
+  const viewers = new Set<chrome.runtime.Port>();
+  let runningEpoch: number | null = null;
+  let replayRequired = false;
+
+  const startIfWatched = () => {
+    if (viewers.size === 0 || runningEpoch === currentScanEpoch) return;
+    runningEpoch = currentScanEpoch;
+    chunkRunner.startOrRescan(currentScanEpoch, replayRequired);
+    replayRequired = false;
+  };
 
   const chunkRunner: ChunkRunnerController = createChunkRunner({
     largeDataUrlStore,
   });
 
   // Listen for background commands
-  chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+  const onMessage: Parameters<typeof chrome.runtime.onMessage.addListener>[0] = (message: unknown, _sender, sendResponse) => {
     if (!isExtensionContextValid()) {
       chunkRunner.destroy();
       return false;
@@ -64,8 +77,9 @@ function createScannerController(): WicScannerController {
 
       case 'BG_START_OR_RESCAN': {
         currentScanEpoch = message.scanEpoch || currentScanEpoch + 1;
-        console.log(`[WIC Content] Received BG_START_OR_RESCAN for epoch ${currentScanEpoch}`);
-        chunkRunner.startOrRescan(currentScanEpoch);
+        replayRequired = true;
+        runningEpoch = null;
+        startIfWatched();
         sendResponse({ ok: true });
         return false;
       }
@@ -87,6 +101,7 @@ function createScannerController(): WicScannerController {
           transferId: message.transferId,
           inlineMaxBytes: message.inlineMaxBytes,
           absoluteMaxBytes: message.absoluteMaxBytes,
+          recipientPanelId: message.recipientPanelId,
         })
           .then((res) => {
             sendResponse({ ok: true, data: res });
@@ -133,23 +148,51 @@ function createScannerController(): WicScannerController {
       }
 
       case 'BG_STOP_SCANNER': {
-        chunkRunner.destroy();
+        if (viewers.size === 0) {
+          chunkRunner.destroy(Boolean(message.releaseData));
+          runningEpoch = null;
+          if (message.releaseData) largeDataUrlStore.clear();
+        }
         sendResponse({ ok: true });
         return false;
       }
     }
-  });
+  };
+  chrome.runtime.onMessage.addListener(onMessage);
+
+  const onConnect = (port: chrome.runtime.Port) => {
+    if (port.name !== PORT_NAMES.SCANNER_LIFECYCLE) return;
+    port.onMessage.addListener((message: ScannerWatchMessage) => {
+      if (message?.type !== 'SCANNER_WATCH' || !Number.isInteger(message.scanEpoch)) return;
+      viewers.add(port);
+      currentScanEpoch = Math.max(currentScanEpoch, message.scanEpoch);
+      startIfWatched();
+    });
+    port.onDisconnect.addListener(() => {
+      viewers.delete(port);
+      if (viewers.size === 0) {
+        chunkRunner.destroy();
+        runningEpoch = null;
+      }
+    });
+  };
+  chrome.runtime.onConnect.addListener(onConnect);
 
   return {
     startOrRescan(scanEpoch: number) {
       currentScanEpoch = scanEpoch;
-      chunkRunner.startOrRescan(scanEpoch);
+      startIfWatched();
     },
     getScanEpoch() {
       return currentScanEpoch;
     },
     destroy() {
-      chunkRunner.destroy();
+      chunkRunner.destroy(true);
+      chrome.runtime.onMessage.removeListener(onMessage);
+      chrome.runtime.onConnect.removeListener(onConnect);
+      for (const port of viewers) port.disconnect();
+      viewers.clear();
+      largeDataUrlStore.clear();
     },
   };
 }

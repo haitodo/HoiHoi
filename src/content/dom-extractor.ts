@@ -16,6 +16,7 @@ import {
   parseSrcset,
   resolveAndValidateImageUrl,
 } from '@shared/url-utils';
+import { registerLargeDataUrl } from './large-data-store';
 
 export interface ExtractorContext {
   baseUri: string;
@@ -96,9 +97,9 @@ function normalizeAndRegisterCandidate(
   let largeDataRefId: string | undefined;
 
   if (url.startsWith('data:') && url.length > INLINE_DATA_URL_SESSION_MAX_CHARS) {
-    largeDataRefId = `data_ref_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    ctx.largeDataUrlStore.set(largeDataRefId, url);
-    storedUrl = `${url.slice(0, 256)}...[large-data-url-truncated]`;
+    largeDataRefId = registerLargeDataUrl(ctx.largeDataUrlStore, url);
+    if (!largeDataRefId) throw new Error('WIC_DATA_CACHE_LIMIT');
+    storedUrl = `${url.slice(0, url.indexOf(',') + 1)}__WIC_LARGE_DATA_${largeDataRefId}__`;
   }
 
   return {

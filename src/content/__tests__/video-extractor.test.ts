@@ -5,7 +5,7 @@ import {
   extractFromVideoElement,
 } from '../video-extractor';
 
-function createMockContext(baseUri = 'https://www.tokyomotion.net/video/3741005/test'): ExtractorContext {
+function createMockContext(baseUri = 'https://www.tokyomotion.net/video/1234567/test'): ExtractorContext {
   let elId = 0;
   let domOrder = 0;
   return {
@@ -27,11 +27,11 @@ describe('video-extractor', () => {
     });
 
     // Simulate TokyoMotion FluidPlayer <video preload="none"> where currentSrc matches SD <source>
-    const sdUrl = 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981';
-    const hdUrl = 'https://www.tokyomotion.net/vsrc/hd/9f11ccb5602e683a9981';
+    const sdUrl = 'https://www.tokyomotion.net/vsrc/sd/test-sd-source';
+    const hdUrl = 'https://www.tokyomotion.net/vsrc/hd/test-hd-source';
     const videoAttrs: Record<string, string> = {
-      poster: 'https://cdn.tokyomotion.net/media/videos/tmb/3741005/default.jpg',
-      slideImage: 'https://cdn.tokyomotion.net/media/videos/sprites/3741005.jpg',
+      poster: 'https://cdn.tokyomotion.net/media/videos/tmb/1234567/default.jpg',
+      slideImage: 'https://cdn.tokyomotion.net/media/videos/sprites/1234567.jpg',
     };
 
     const mockVideo = {
@@ -62,7 +62,7 @@ describe('video-extractor', () => {
     expect(videoGroup?.durationSec).toBe(285.05);
     // Prefers <video poster> over sprite sheet slideImage
     expect(videoGroup?.posterUrl).toBe(
-      'https://cdn.tokyomotion.net/media/videos/tmb/3741005/default.jpg',
+      'https://cdn.tokyomotion.net/media/videos/tmb/1234567/default.jpg',
     );
     expect(videoGroup?.variants).toHaveLength(2);
     expect(videoGroup?.variants[0]).toMatchObject({

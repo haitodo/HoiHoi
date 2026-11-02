@@ -4,6 +4,10 @@ import {
   SCAN_BATCH_INTERVAL_MS,
   SCAN_BATCH_MAX_SIZE,
   SCAN_CHUNK_BUDGET_MS,
+  MAX_PENDING_SCAN_NODES,
+  MAX_OCCURRENCE_KEYS_PER_TAB,
+  MAX_VARIANTS_PER_ITEM,
+  INLINE_DATA_URL_SESSION_MAX_CHARS,
 } from '@shared/constants';
 import type { ContentToBackgroundMessage } from '@shared/messages';
 import type { RawCandidateGroup, RawVideoCandidateGroup } from '@shared/types';
@@ -16,20 +20,19 @@ import {
 } from './dom-extractor';
 import { createNetworkMediaObserver } from './network-media-observer';
 import {
-  collectShadowDomVideos,
-  extractEmbeddedScriptAndConfigVideos,
+  iterateEmbeddedScriptAndConfigVideos,
   extractFromVideoElement,
   extractFromVideoLinkOrLazyElement,
   extractPageFallbackVideoMeta,
-  extractPageMetadataVideos,
+  iteratePageMetadataVideos,
   tryCaptureReadyVideoFrame,
   type PageFallbackVideoMeta,
 } from './video-extractor';
 import { isKnownAdOrTrackerVideoUrl } from '@shared/video-utils';
 
 export interface ChunkRunnerController {
-  startOrRescan(scanEpoch: number): void;
-  destroy(): void;
+  startOrRescan(scanEpoch: number, replay?: boolean): void;
+  destroy(releaseCache?: boolean): void;
 }
 
 // Highly selective query to avoid running expensive getComputedStyle on thousands of plain elements
@@ -86,7 +89,7 @@ function isContextInvalidatedError(err: unknown): boolean {
 function safeSendMessage(
   message: ContentToBackgroundMessage,
   onInvalidated?: () => void,
-): void {
+): Promise<unknown> | undefined {
   if (!isExtensionContextValid()) {
     onInvalidated?.();
     return;
@@ -95,7 +98,7 @@ function safeSendMessage(
   try {
     const promise = chrome.runtime.sendMessage(message);
     if (promise && typeof promise.catch === 'function') {
-      promise.catch((err: unknown) => {
+      return promise.catch((err: unknown) => {
         if (isContextInvalidatedError(err)) {
           onInvalidated?.();
         } else {
@@ -122,7 +125,6 @@ export function createChunkRunner(options: {
   let elementCounter = 0;
   let domOrderCounter = 0;
   const elementIdMap = new WeakMap<Element, number>();
-  const shadowVideoSet = new WeakSet<HTMLVideoElement>();
 
   const extractorContext: ExtractorContext = {
     get baseUri() {
@@ -142,6 +144,30 @@ export function createChunkRunner(options: {
   let batchFlushTimer: number | null = null;
   let totalCandidatesSent = 0;
   let isObserving = false;
+  let reportedComplete = false;
+  let cacheLimitReached = false;
+  const lastSentGroups = new Map<string, string>();
+  let signatureChars = 0;
+  let inFlightBatches = 0;
+  let waitingForBatch = false;
+  let runGeneration = 0;
+
+  function changedGroup(group: RawCandidateGroup | RawVideoCandidateGroup): boolean {
+    const signature = JSON.stringify({ ...group, domOrder: 0 });
+    if (lastSentGroups.get(group.occurrenceKey) === signature) return false;
+    signatureChars -= lastSentGroups.get(group.occurrenceKey)?.length ?? 0;
+    lastSentGroups.delete(group.occurrenceKey);
+    if (signature.length > 1_000_000) return true;
+    while (lastSentGroups.size >= MAX_OCCURRENCE_KEYS_PER_TAB || signatureChars + signature.length > 1_000_000) {
+      const key = lastSentGroups.keys().next().value;
+      if (key === undefined) break;
+      signatureChars -= lastSentGroups.get(key)!.length;
+      lastSentGroups.delete(key);
+    }
+    lastSentGroups.set(group.occurrenceKey, signature);
+    signatureChars += signature.length;
+    return true;
+  }
 
   function stopObserving() {
     if (!isObserving) return;
@@ -180,9 +206,17 @@ export function createChunkRunner(options: {
     }
   }
 
-  function destroy() {
+  function destroy(releaseCache = false) {
+    if (releaseCache) {
+      lastSentGroups.clear();
+      signatureChars = 0;
+      networkObserver.resetSeenUrls();
+    }
     if (isDestroyed) return;
     isDestroyed = true;
+    runGeneration++;
+    inFlightBatches = 0;
+    waitingForBatch = false;
 
     stopObserving();
 
@@ -200,6 +234,9 @@ export function createChunkRunner(options: {
     }
 
     pendingElements = [];
+    discoveryTasks = [];
+    discoveryIndex = 0;
+    isSliceRunning = false;
     batchBuffer = [];
     videoBatchBuffer = [];
     mutatedElements.clear();
@@ -217,6 +254,7 @@ export function createChunkRunner(options: {
     }
 
     if (batchBuffer.length === 0 && videoBatchBuffer.length === 0) return;
+    if (inFlightBatches >= 2) return;
 
     const groupsToSend = batchBuffer;
     const videoGroupsToSend = videoBatchBuffer;
@@ -234,7 +272,23 @@ export function createChunkRunner(options: {
       videoGroups: videoGroupsToSend.length > 0 ? videoGroupsToSend : undefined,
     };
 
-    safeSendMessage(message, destroy);
+    const generation = runGeneration;
+    inFlightBatches++;
+    void Promise.resolve(safeSendMessage(message, destroy)).then((response) => {
+      if (!(response as { ok?: boolean } | undefined)?.ok && generation === runGeneration) {
+        for (const group of [...groupsToSend, ...videoGroupsToSend]) {
+          signatureChars -= lastSentGroups.get(group.occurrenceKey)?.length ?? 0;
+          lastSentGroups.delete(group.occurrenceKey);
+        }
+      }
+    }).finally(() => {
+      if (generation !== runGeneration || isDestroyed) return;
+      inFlightBatches--;
+      if (waitingForBatch && sliceTimer === null) {
+        waitingForBatch = false;
+        sliceTimer = window.setTimeout(runNextSlice, 0);
+      } else if (batchBuffer.length || videoBatchBuffer.length) scheduleFlushCheck();
+    });
   }
 
   function scheduleFlushCheck() {
@@ -253,6 +307,14 @@ export function createChunkRunner(options: {
       destroy();
       return;
     }
+    group = { ...group, variants: group.variants.slice(0, MAX_VARIANTS_PER_ITEM) };
+    if (group.primaryUrl.startsWith('data:') && group.primaryUrl.length > INLINE_DATA_URL_SESSION_MAX_CHARS) {
+      const replacement = group.variants.find((variant) => variant.largeDataRefId)?.url;
+      if (!replacement) return;
+      group = { ...group, primaryUrl: replacement,
+        occurrenceKey: group.occurrenceKey.replace(group.primaryUrl, replacement) };
+    }
+    if (!changedGroup(group)) return;
     batchBuffer.push(group);
     scheduleFlushCheck();
   }
@@ -262,6 +324,15 @@ export function createChunkRunner(options: {
       destroy();
       return;
     }
+    group = { ...group, variants: group.variants.slice(0, MAX_VARIANTS_PER_ITEM),
+      posterUrl: group.posterUrl && group.posterUrl.length <= INLINE_DATA_URL_SESSION_MAX_CHARS ? group.posterUrl : undefined };
+    if (group.primaryUrl.startsWith('data:') && group.primaryUrl.length > INLINE_DATA_URL_SESSION_MAX_CHARS) {
+      const replacement = group.variants.find((variant) => variant.largeDataRefId)?.url;
+      if (!replacement) return;
+      group = { ...group, primaryUrl: replacement,
+        occurrenceKey: group.occurrenceKey.replace(group.primaryUrl, replacement) };
+    }
+    if (!changedGroup(group)) return;
     videoBatchBuffer.push(group);
     scheduleFlushCheck();
   }
@@ -272,10 +343,46 @@ export function createChunkRunner(options: {
   let isSliceRunning = false;
   let sliceTimer: number | null = null;
   let cachedPageFallbackMeta: PageFallbackVideoMeta | undefined;
+  let discoveryTasks: Array<Iterator<Element | undefined>> = [];
+  let discoveryIndex = 0;
+
+  // TreeWalker advances one node at a time; no whole-document snapshot or subtree query
+  // runs inside a MutationObserver callback. Open shadow roots share the same time budget.
+  function* discover(root: ParentNode, depth = 0): Generator<Element> {
+    if (root instanceof Element) yield root;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      const el = node as Element;
+      yield el;
+      if (el.shadowRoot && depth < 4) yield* discover(el.shadowRoot, depth + 1);
+    }
+    if (root instanceof Element && root.shadowRoot && depth < 4) {
+      yield* discover(root.shadowRoot, depth + 1);
+    }
+  }
+
+  function* discoverMetadata(): Generator<undefined> {
+    cachedPageFallbackMeta = extractPageFallbackVideoMeta(document, extractorContext.baseUri);
+    yield undefined;
+    for (const group of iteratePageMetadataVideos(document, extractorContext)) {
+      if (group) enqueueVideoGroup(group);
+      yield undefined;
+    }
+    for (const group of iterateEmbeddedScriptAndConfigVideos(document, extractorContext, cachedPageFallbackMeta)) {
+      if (group) enqueueVideoGroup(group);
+      yield undefined;
+    }
+    for (const group of networkObserver.scanBufferedEntries()) {
+      enqueueVideoGroup(group);
+      yield undefined;
+    }
+  }
 
   function getSingleVideoPageFallback(): PageFallbackVideoMeta | undefined {
     if (!cachedPageFallbackMeta) return undefined;
-    return document.querySelectorAll('video').length === 1 ? cachedPageFallbackMeta : undefined;
+    const videos = document.getElementsByTagName('video');
+    return videos.length === 1 ? cachedPageFallbackMeta : undefined;
   }
 
   function processElement(el: Element) {
@@ -289,7 +396,7 @@ export function createChunkRunner(options: {
       const { videoGroup, posterImageGroup } = extractFromVideoElement(
         el,
         extractorContext,
-        shadowVideoSet.has(el),
+        el.getRootNode() instanceof ShadowRoot,
         getSingleVideoPageFallback(),
       );
       if (videoGroup) enqueueVideoGroup(videoGroup);
@@ -302,7 +409,7 @@ export function createChunkRunner(options: {
         const { videoGroup, posterImageGroup } = extractFromVideoElement(
           el.parentElement,
           extractorContext,
-          shadowVideoSet.has(el.parentElement),
+          el.parentElement.getRootNode() instanceof ShadowRoot,
           getSingleVideoPageFallback(),
         );
         if (videoGroup) enqueueVideoGroup(videoGroup);
@@ -345,10 +452,28 @@ export function createChunkRunner(options: {
 
     const sliceStart = performance.now();
 
-    while (pendingIndex < pendingElements.length) {
-      const el = pendingElements[pendingIndex++];
-      if (el) {
-        processElement(el);
+    while (pendingIndex < pendingElements.length || discoveryIndex < discoveryTasks.length) {
+      if (inFlightBatches >= 2) {
+        waitingForBatch = true;
+        return;
+      }
+      try {
+        let el: Element | undefined;
+        if (pendingIndex < pendingElements.length) {
+          el = pendingElements[pendingIndex++];
+        } else {
+          const next = discoveryTasks[discoveryIndex]!.next();
+          if (next.done) discoveryIndex++;
+          else el = next.value;
+        }
+        if (el?.isConnected && el.matches(MEDIA_TARGET_SELECTOR)) processElement(el);
+      } catch (error) {
+        if (String(error).includes('WIC_DATA_CACHE_LIMIT')) {
+          if (!cacheLimitReached) safeSendMessage({ channel: 'WIC_CONTENT_TO_BG', type: 'CONTENT_SCAN_STATUS',
+            scanEpoch: currentScanEpoch, pageUrl: window.location.href, status: 'limit_reached' }, destroy);
+          cacheLimitReached = true;
+        }
+        else console.warn('[WIC Content] Skipped an unavailable media element:', error);
       }
 
       // Check time slice budget (8ms)
@@ -362,11 +487,17 @@ export function createChunkRunner(options: {
     isSliceRunning = false;
     pendingElements = [];
     pendingIndex = 0;
+    discoveryTasks = [];
+    discoveryIndex = 0;
     flushBatch();
+    if (inFlightBatches > 0) {
+      waitingForBatch = true;
+      isSliceRunning = true;
+      return;
+    }
 
-    console.log(
-      `[WIC Content] Scan complete for epoch ${currentScanEpoch}. Total candidates: ${totalCandidatesSent}`,
-    );
+    if (reportedComplete) return;
+    reportedComplete = true;
 
     // Notify background SW that initial traversal for current scanEpoch is done
     const statusMsg: ContentToBackgroundMessage = {
@@ -375,7 +506,7 @@ export function createChunkRunner(options: {
       scanEpoch: currentScanEpoch,
       pageUrl: window.location.href,
       pageTitle: document.title || undefined,
-      status: 'watching',
+      status: cacheLimitReached ? 'limit_reached' : 'watching',
     };
     safeSendMessage(statusMsg, destroy);
   }
@@ -387,6 +518,7 @@ export function createChunkRunner(options: {
     }
 
     for (const el of elements) {
+      if (pendingElements.length - pendingIndex >= MAX_PENDING_SCAN_NODES) break;
       pendingElements.push(el);
     }
 
@@ -410,32 +542,19 @@ export function createChunkRunner(options: {
         for (let i = 0; i < mut.addedNodes.length; i++) {
           const node = mut.addedNodes[i];
           if (node instanceof Element) {
-            if (node.matches(MEDIA_TARGET_SELECTOR)) {
-              mutatedElements.add(node);
-            }
-            const descendants = node.querySelectorAll(MEDIA_TARGET_SELECTOR);
-            for (let j = 0; j < descendants.length; j++) {
-              mutatedElements.add(descendants[j]!);
-            }
-            if (node.shadowRoot) {
-              const sVideos = collectShadowDomVideos(node.shadowRoot);
-              for (const sv of sVideos) {
-                shadowVideoSet.add(sv);
-                mutatedElements.add(sv);
-              }
-            }
+            if (mutatedElements.size < MAX_PENDING_SCAN_NODES) mutatedElements.add(node);
           }
         }
       } else if (mut.type === 'attributes') {
-        if (mut.target instanceof Element) {
+        if (mut.attributeName === 'style' && mut.target instanceof Element &&
+          !/background|url\(/i.test(mut.target.getAttribute('style') ?? '')) continue;
+        if (mut.target instanceof Element && mut.target.matches(MEDIA_TARGET_SELECTOR) && mutatedElements.size < MAX_PENDING_SCAN_NODES) {
           mutatedElements.add(mut.target);
         }
       }
     }
 
-    if (mutationDebounceTimer !== null) {
-      clearTimeout(mutationDebounceTimer);
-    }
+    if (mutatedElements.size === 0 || mutationDebounceTimer !== null) return;
     mutationDebounceTimer = window.setTimeout(() => {
       mutationDebounceTimer = null;
       if (isDestroyed || !isExtensionContextValid()) {
@@ -445,7 +564,13 @@ export function createChunkRunner(options: {
       if (mutatedElements.size > 0) {
         const batch = Array.from(mutatedElements);
         mutatedElements.clear();
-        scheduleElements(batch);
+        if (discoveryTasks.length - discoveryIndex + batch.length >= MAX_PENDING_SCAN_NODES) {
+          discoveryTasks = [discover(document)];
+          discoveryIndex = 0;
+        } else {
+          for (const root of batch) discoveryTasks.push(discover(root));
+        }
+        scheduleElements([]);
       }
     }, MUTATION_DEBOUNCE_MS);
   });
@@ -459,20 +584,7 @@ export function createChunkRunner(options: {
 
     const target = e.target;
     if (target instanceof HTMLImageElement) {
-      if (target.naturalWidth > 0 && target.naturalHeight > 0) {
-        const url = target.currentSrc || target.src;
-        if (url) {
-          const msg: ContentToBackgroundMessage = {
-            channel: 'WIC_CONTENT_TO_BG',
-            type: 'CONTENT_IMAGE_LOADED_DIMENSIONS',
-            scanEpoch: currentScanEpoch,
-            url,
-            naturalWidth: target.naturalWidth,
-            naturalHeight: target.naturalHeight,
-          };
-          safeSendMessage(msg, destroy);
-        }
-      }
+      if (target.naturalWidth > 0 && target.naturalHeight > 0) scheduleElements([target]);
     }
   };
 
@@ -533,7 +645,7 @@ export function createChunkRunner(options: {
   };
 
   return {
-    startOrRescan(scanEpoch: number) {
+    startOrRescan(scanEpoch: number, replay = false) {
       if (!isExtensionContextValid()) {
         destroy();
         return;
@@ -544,6 +656,16 @@ export function createChunkRunner(options: {
       ensureObserving();
 
       currentScanEpoch = scanEpoch;
+      runGeneration++;
+      inFlightBatches = 0;
+      waitingForBatch = false;
+      if (replay) {
+        lastSentGroups.clear();
+        signatureChars = 0;
+        networkObserver.resetSeenUrls();
+      }
+      reportedComplete = false;
+      cacheLimitReached = false;
       totalCandidatesSent = 0;
       if (sliceTimer !== null) {
         clearTimeout(sliceTimer);
@@ -554,6 +676,9 @@ export function createChunkRunner(options: {
       pendingIndex = 0;
       batchBuffer = [];
       videoBatchBuffer = [];
+      mutatedElements.clear();
+      if (mutationDebounceTimer !== null) clearTimeout(mutationDebounceTimer);
+      mutationDebounceTimer = null;
 
       // Notify scan in progress
       const statusMsg: ContentToBackgroundMessage = {
@@ -566,43 +691,9 @@ export function createChunkRunner(options: {
       };
       safeSendMessage(statusMsg, destroy);
 
-      // Refresh page-level OGP fallback metadata for single-player watch pages
-      cachedPageFallbackMeta = extractPageFallbackVideoMeta(document, extractorContext.baseUri);
-
-      // Layer 2A: Passive OGP / JSON-LD metadata extraction
-      const metaVideoGroups = extractPageMetadataVideos(document, extractorContext);
-      for (const g of metaVideoGroups) {
-        enqueueVideoGroup(g);
-      }
-
-      // Layer 2B: Passive inline <script> & player data-config embedded URL extraction
-      const scriptVideoGroups = extractEmbeddedScriptAndConfigVideos(
-        document,
-        extractorContext,
-        cachedPageFallbackMeta,
-      );
-      for (const g of scriptVideoGroups) {
-        enqueueVideoGroup(g);
-      }
-
-      // Layer 3: Passive buffered PerformanceResourceTiming inspection
-      const networkVideoGroups = networkObserver.scanBufferedEntries();
-      for (const g of networkVideoGroups) {
-        enqueueVideoGroup(g);
-      }
-
-      // Layer 1: Targeted fast DOM query + Open Shadow DOM videos
-      const directTargets = Array.from(document.querySelectorAll(MEDIA_TARGET_SELECTOR));
-      const shadowVideos = collectShadowDomVideos(document);
-      for (const sv of shadowVideos) {
-        shadowVideoSet.add(sv);
-        directTargets.push(sv);
-      }
-
-      console.log(
-        `[WIC Content] Starting scan for epoch ${scanEpoch}. Found ${directTargets.length} potential media elements.`,
-      );
-      scheduleElements(directTargets);
+      discoveryTasks = [discoverMetadata(), discover(document)];
+      discoveryIndex = 0;
+      scheduleElements([]);
     },
     destroy,
   };

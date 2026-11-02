@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DownloadManager } from '../download-manager';
 import { sessionStore } from '../session-store';
+import { refererRuleManager } from '../referer-rules';
 
 describe('DownloadManager (Dual-Lane & Readiness Gate)', () => {
   let manager: DownloadManager;
@@ -130,6 +131,106 @@ describe('DownloadManager (Dual-Lane & Readiness Gate)', () => {
     expect(sessionStore.getSnapshot(tabId).downloads['vid_1']?.status).toBe('canceled');
   });
 
+  it('holds image slots until Chrome reports completion and releases slots on failure/cancel', async () => {
+    const tabId = 601;
+    sessionStore.resetSessionForNewPage(tabId, 'https://example.com', 'watching');
+    const epoch = sessionStore.getSession(tabId)!.scanEpoch;
+    sessionStore.mergeCandidateGroups(tabId, epoch, Array.from({ length: 10 }, (_, i) => ({
+      occurrenceKey: `img_${i}`, primaryUrl: `https://example.com/${i}.jpg`, domOrder: i,
+      variants: [{ url: `https://example.com/${i}.jpg`, role: 'src', source: 'img', naturalWidth: 100, naturalHeight: 100 }],
+    })));
+    const ids = sessionStore.getSnapshot(tabId).items.map((item) => item.itemId);
+    manager.enqueue(tabId, ids);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(startedDownloads).toHaveLength(3);
+    manager.handleDownloadDelta({ id: startedDownloads[0]!.id, state: { current: 'complete' } });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(startedDownloads).toHaveLength(4);
+    manager.handleDownloadDelta({ id: startedDownloads[1]!.id, state: { current: 'interrupted' },
+      error: { current: 'NETWORK_FAILED' } });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(startedDownloads).toHaveLength(5);
+    await manager.cancelDownload(tabId, ids[2]!);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(startedDownloads).toHaveLength(6);
+    expect(Object.values(sessionStore.getSnapshot(tabId).downloads)
+      .filter((download) => download.status === 'in_progress')).toHaveLength(3);
+  });
+
+  it('does not consume a slot permanently when the Downloads API rejects a start', async () => {
+    const tabId = 602;
+    sessionStore.resetSessionForNewPage(tabId, 'https://example.com', 'watching');
+    sessionStore.mergeCandidateGroups(tabId, sessionStore.getSession(tabId)!.scanEpoch,
+      Array.from({ length: 4 }, (_, i) => ({
+        occurrenceKey: `img_${i}`, primaryUrl: `https://example.com/${i}.jpg`, domOrder: i,
+        variants: [{ url: `https://example.com/${i}.jpg`, role: 'src', source: 'img', naturalWidth: 100, naturalHeight: 100 }],
+      })));
+    (chrome.downloads.download as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('start failed'));
+    manager.enqueue(tabId, sessionStore.getSnapshot(tabId).items.map((item) => item.itemId));
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(startedDownloads).toHaveLength(3);
+    expect(Object.values(sessionStore.getSnapshot(tabId).downloads)
+      .filter((download) => download.status === 'failed')).toHaveLength(1);
+  });
+
+  it('keeps video slots and Referer rules until completion, routes work to one panel, and polls only while viewed', async () => {
+    vi.useFakeTimers();
+    const acquire = vi.spyOn(refererRuleManager, 'acquireDownloadRule').mockResolvedValue();
+    const release = vi.spyOn(refererRuleManager, 'releaseDownloadRule').mockResolvedValue();
+    try {
+      const tabId = 603;
+      sessionStore.resetSessionForNewPage(tabId, 'https://example.com', 'watching');
+      sessionStore.mergeVideoCandidateGroups(tabId, sessionStore.getSession(tabId)!.scanEpoch,
+        Array.from({ length: 5 }, (_, i) => ({
+          occurrenceKey: `vid_${i}`, primaryUrl: `https://cdn.example.com/clip${i}.mp4`, domOrder: i, durationSec: 10,
+          variants: [{ url: `https://cdn.example.com/clip${i}.mp4`, role: 'src', source: 'video-element', videoWidth: 100, videoHeight: 100 }],
+        })));
+      (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(async (msg) => {
+        runtimeMessages.push(msg);
+        return { ok: true, data: { mode: 'direct_url_fallback', finalUrl: msg.url, totalBytes: 1000 } };
+      });
+      (chrome.downloads.search as ReturnType<typeof vi.fn>).mockResolvedValue([{ state: 'in_progress', bytesReceived: 1, totalBytes: 1000 }]);
+      manager.enqueue(tabId, sessionStore.getSnapshot(tabId).videos.map((video) => video.itemId), 'panel-owner');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(startedDownloads).toHaveLength(2);
+      expect(runtimeMessages).toEqual(expect.arrayContaining([expect.objectContaining({ recipientPanelId: 'panel-owner' })]));
+      expect(release).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(chrome.downloads.search).not.toHaveBeenCalled();
+      manager.setProgressSubscribers(new Set([tabId]));
+      await vi.advanceTimersByTimeAsync(500);
+      expect(chrome.downloads.search).toHaveBeenCalledTimes(2);
+      manager.setProgressSubscribers(new Set());
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(chrome.downloads.search).toHaveBeenCalledTimes(2);
+      manager.handleDownloadDelta({ id: startedDownloads[0]!.id, state: { current: 'complete' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(release).toHaveBeenCalledWith(expect.stringContaining(`${tabId}:`));
+      expect(startedDownloads).toHaveLength(3);
+    } finally {
+      acquire.mockRestore(); release.mockRestore(); vi.clearAllTimers(); vi.useRealTimers();
+    }
+  });
+
+  it('does not resurrect a completed download when index persistence finishes late', async () => {
+    const tabId = 604;
+    sessionStore.resetSessionForNewPage(tabId, 'https://example.com', 'watching');
+    sessionStore.mergeCandidateGroups(tabId, sessionStore.getSession(tabId)!.scanEpoch, [{
+      occurrenceKey: 'img', primaryUrl: 'https://example.com/one.jpg', domOrder: 1,
+      variants: [{ url: 'https://example.com/one.jpg', role: 'src', source: 'img', naturalWidth: 100, naturalHeight: 100 }],
+    }]);
+    let finish!: () => void;
+    (chrome.storage.session.set as ReturnType<typeof vi.fn>).mockImplementationOnce(() =>
+      new Promise<void>((resolve) => { finish = resolve; }));
+    const itemId = sessionStore.getSnapshot(tabId).items[0]!.itemId;
+    manager.enqueue(tabId, [itemId]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    manager.handleDownloadDelta({ id: startedDownloads[0]!.id, state: { current: 'complete' } });
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(sessionStore.getSnapshot(tabId).downloads[itemId]?.status).toBe('completed');
+  });
+
   it('saves assembled HLS streams and revokes Side Panel ObjectURL upon completion', async () => {
     const tabId = 502;
     sessionStore.resetSessionForNewPage(
@@ -170,12 +271,12 @@ describe('DownloadManager (Dual-Lane & Readiness Gate)', () => {
   it('streams Referer-protected HTTP video to ObjectURL with redirected filename and mid-stream cancel', async () => {
     const tabId = 503;
     const redirectedCdnUrl =
-      'https://www47.tokyomotion.net/video/5bef0447760e69bf70c8ff816085f40d/6ae73a89/iphone/3741005.mp4?md5=LBd_l-x41sPt-IllUbwDeg&expires=1793542297';
-    const mintedObjectUrl = 'blob:chrome-extension://ext123/tmo-3741005';
+      'https://www47.tokyomotion.net/video/test-cdn-path/test-session/iphone/1234567.mp4?md5=test&expires=2000000000';
+    const mintedObjectUrl = 'blob:chrome-extension://ext123/tmo-1234567';
 
     sessionStore.resetSessionForNewPage(
       tabId,
-      'https://www.tokyomotion.net/video/3741005/sample',
+      'https://www.tokyomotion.net/video/1234567/sample',
       'watching',
       'Sample Video Title',
     );
@@ -185,12 +286,12 @@ describe('DownloadManager (Dual-Lane & Readiness Gate)', () => {
       [
         {
           occurrenceKey: 'vid_tmo_1',
-          primaryUrl: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+          primaryUrl: 'https://www.tokyomotion.net/vsrc/sd/test-sd-source',
           domOrder: 1,
           durationSec: 285.05,
           variants: [
             {
-              url: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+              url: 'https://www.tokyomotion.net/vsrc/sd/test-sd-source',
               role: 'source-tag',
               source: 'video-source',
               descriptor: 'SD',
@@ -218,7 +319,7 @@ describe('DownloadManager (Dual-Lane & Readiness Gate)', () => {
           ],
         },
       ],
-      'https://www.tokyomotion.net/video/3741005/sample',
+      'https://www.tokyomotion.net/video/1234567/sample',
     );
 
     let resolveSecondStream: ((res: unknown) => void) | undefined;
@@ -250,10 +351,10 @@ describe('DownloadManager (Dual-Lane & Readiness Gate)', () => {
     manager.enqueue(tabId, ['vid_1', 'vid_2']);
     await new Promise((r) => setTimeout(r, 25));
 
-    // vid_1 resolved opaque /vsrc/sd/... into Sample Video Title/3741005.mp4 via minted ObjectURL
+    // vid_1 resolved opaque /vsrc/sd/... into Sample Video Title/1234567.mp4 via minted ObjectURL
     expect(startedDownloads).toHaveLength(1);
     expect(startedDownloads[0]?.url).toBe(mintedObjectUrl);
-    expect(startedDownloads[0]?.filename).toBe('Sample Video Title/3741005.mp4');
+    expect(startedDownloads[0]?.filename).toBe('Sample Video Title/1234567.mp4');
 
     // Complete vid_1 and verify ObjectURL revocation
     manager.handleDownloadDelta({

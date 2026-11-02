@@ -6,6 +6,7 @@ Webページ上の画像を検出し、Chrome Side Panel 上で選択・一括�
 
 1. **[spec.md](spec.md)**: 利用者向け機能仕様書 (MVP版 v1.1)
 2. **[design.md](design.md)**: **コアアーキテクチャ技術設計書** (必須の7大ガードレール、データ構造、非同期同期モデル、別のAIへの実装委譲タスク一覧)
+3. **[performance.md](performance.md)**: 未使用時の停止条件、リソース上限、回帰テスト、実ブラウザでの確認手順
 
 ---
 
@@ -39,7 +40,7 @@ pnpm package
 
 Chrome 拡張機能は通常、読み込みフォルダのパスやパッケージ化のたびに生成される秘密鍵によって32桁の拡張機能ID（例: `aknfdhacadhkkenklgmjklchcfjjnghh`）が変化します。IDが変わってしまうと、ブラウザに保存された設定（`chrome.storage`）や権限許可、ツールバーのピン留めが初期化されてしまいます。
 
-本プロジェクトでは**ID固定化の自動管理機構**（[scripts/package.mjs](file:///d:/dev/HoiHoi/scripts/package.mjs)）を導入しています：
+本プロジェクトでは**ID固定化の自動管理機構**（[scripts/package.mjs](scripts/package.mjs)）を導入しています：
 
 1. **秘密鍵 (`key.pem`) の永続化**:
    - 初回パッケージ化時に RSA 秘密鍵 `key.pem` を自動生成し、以降はこの鍵を一貫して使用します。
@@ -68,7 +69,7 @@ Chrome 拡張機能は通常、読み込みフォルダのパスやパッケー�
 - **Step 1: 共有純粋ロジック (完了)**:
   - `src/shared/url-utils.ts`: URL解決・スキーム検証・CDNカンマ混入srcset解析・CSS背景url解析・拡張子判定・形式推定
   - `src/shared/filename-utils.ts`: Windows予約デバイス名（CON, PRN等）対応・禁止文字サニタイズ・100文字制限・重複回避
-  - `src/shared/__tests__/*.test.ts`: 単体テスト22件通過
+  - `src/**/__tests__/*`: 監視の寿命・キャッシュ・保存復旧・キュー・ストリーム転送を含む回帰テスト
 - **Step 2: Content Script スキャナ (完了)**:
   - `src/content/dom-extractor.ts`: img/picture/css-bg/svg/lazy/a.href からの候補グループ抽出、32KB超 data: URL の退避
   - `src/content/chunk-runner.ts`: 8msタイムスライス走査、40件/50msバッチ送信、MutationObserver（150msデバウンス）、キャプチャ load イベントによる寸法追従

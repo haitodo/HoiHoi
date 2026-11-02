@@ -1,4 +1,5 @@
 import { BLOB_STREAM_CHUNK_BYTES, PORT_NAMES } from '@shared/constants';
+import { readTextLimited } from '@shared/response-utils';
 import type {
   BlobDataUrlResponse,
   BlobStreamPortMessage,
@@ -56,6 +57,7 @@ export async function prepareOrStreamVideoBlob(options: {
   transferId: string;
   inlineMaxBytes: number;
   absoluteMaxBytes: number;
+  recipientPanelId?: string;
 }): Promise<VideoBlobPrepareResponse> {
   const { blobUrl, transferId, inlineMaxBytes, absoluteMaxBytes } = options;
 
@@ -100,7 +102,29 @@ export async function prepareOrStreamVideoBlob(options: {
   }
 
   // Large video blob (> 16 MB): stream 4 MB slices to Side Panel via Port
-  const port = chrome.runtime.connect({ name: PORT_NAMES.BLOB_STREAM });
+  const port = chrome.runtime.connect({ name: options.recipientPanelId
+    ? `${PORT_NAMES.BLOB_STREAM}:${options.recipientPanelId}` : PORT_NAMES.BLOB_STREAM });
+  let awaiting: { index: number; resolve: () => void; reject: (error: Error) => void } | null = null;
+  port.onMessage.addListener((message: BlobStreamPortMessage) => {
+    if (message.transferId !== transferId) return;
+    if (message.type === 'BLOB_STREAM_ACK' && awaiting?.index === message.index) awaiting.resolve();
+    if (message.type === 'BLOB_STREAM_ERROR') awaiting?.reject(new Error(message.error));
+  });
+  port.onDisconnect.addListener(() => {
+    void chrome.runtime.lastError;
+    awaiting?.reject(new Error('保存パネルとの接続が切断されました'));
+  });
+  const postAndWait = (message: BlobStreamPortMessage, index: number) => new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => finish(new Error('保存パネルからの応答がありません')), 15_000);
+    const finish = (error?: Error) => {
+      clearTimeout(timer);
+      awaiting = null;
+      if (error) reject(error); else resolve();
+    };
+    awaiting = { index, resolve: () => finish(), reject: (error) => finish(error) };
+    try { port.postMessage(message); }
+    catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
+  });
   try {
     const initMsg: BlobStreamPortMessage = {
       type: 'BLOB_STREAM_INIT',
@@ -108,7 +132,7 @@ export async function prepareOrStreamVideoBlob(options: {
       mimeType,
       totalBytes: blob.size,
     };
-    port.postMessage(initMsg);
+    await postAndWait(initMsg, -1);
 
     let offset = 0;
     let chunkIndex = 0;
@@ -125,7 +149,7 @@ export async function prepareOrStreamVideoBlob(options: {
         index: chunkIndex++,
         base64Chunk,
       };
-      port.postMessage(chunkMsg);
+      await postAndWait(chunkMsg, chunkIndex - 1);
       offset = end;
     }
 
@@ -133,7 +157,7 @@ export async function prepareOrStreamVideoBlob(options: {
       type: 'BLOB_STREAM_COMPLETE',
       transferId,
     };
-    port.postMessage(doneMsg);
+    await postAndWait(doneMsg, -2);
   } catch (err) {
     try {
       const errMsg: BlobStreamPortMessage = {
@@ -145,12 +169,8 @@ export async function prepareOrStreamVideoBlob(options: {
     } catch {}
     throw err;
   } finally {
-    // Allow queued messages to flush before disconnecting
-    setTimeout(() => {
-      try {
-        port.disconnect();
-      } catch {}
-    }, 500);
+    // Completion was acknowledged; no delayed disconnect or idle timer is necessary.
+    port.disconnect();
   }
 
   return {
@@ -169,11 +189,7 @@ export async function fetchTextOnDemand(url: string, maxChars = 512_000): Promis
   if (!response.ok) {
     throw new Error(`マニフェストの取得に失敗しました (HTTP ${response.status})`);
   }
-  const text = await response.text();
-  if (text.length > maxChars) {
-    return text.slice(0, maxChars);
-  }
-  return text;
+  return readTextLimited(response, maxChars);
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {

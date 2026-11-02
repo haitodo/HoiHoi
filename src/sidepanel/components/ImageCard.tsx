@@ -33,9 +33,14 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   const activeVariant =
     item.variants.find((v) => v.url === item.selectedUrl) || item.variants[0];
   const selectedUrl = item.selectedUrl;
+  const thumbnailVariant = item.variants.find((variant) => variant.url === item.primaryUrl && !variant.largeDataRefId)
+    ?? item.variants.find((variant) => !variant.largeDataRefId && variant.roles.some((role) =>
+      role === 'src' || role === 'current-src' || role === 'lazy-attr'))
+    ?? activeVariant;
   const previewUrl = useThumbnailFallback
-    ? (item.primaryUrl || selectedUrl)
-    : selectedUrl;
+    ? selectedUrl
+    : (thumbnailVariant?.url ?? selectedUrl);
+  const previewVariant = item.variants.find((variant) => variant.url === previewUrl);
 
   const handleCopyUrl = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -231,7 +236,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             alt="Thumbnail"
             loading="lazy"
             onError={() => {
-              if (!useThumbnailFallback && item.primaryUrl && item.primaryUrl !== selectedUrl) {
+              if (!useThumbnailFallback && previewUrl !== selectedUrl) {
                 setUseThumbnailFallback(true);
               } else {
                 setImgError(true);
@@ -242,9 +247,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
               if (
                 naturalWidth > 0 &&
                 naturalHeight > 0 &&
-                (!activeVariant?.naturalWidth || !activeVariant?.naturalHeight)
+                (!previewVariant?.naturalWidth || !previewVariant?.naturalHeight)
               ) {
-                onReportDimensions(selectedUrl, naturalWidth, naturalHeight);
+                onReportDimensions(previewUrl, naturalWidth, naturalHeight);
               }
             }}
             style={{

@@ -1,6 +1,12 @@
 import {
   MAX_ITEMS_PER_TAB,
   MAX_VIDEOS_PER_TAB,
+  MAX_CACHED_TAB_SESSIONS,
+  MAX_OCCURRENCE_KEYS_PER_TAB,
+  MAX_SESSION_PAYLOAD_BYTES,
+  INLINE_DATA_URL_SESSION_MAX_CHARS,
+  MAX_VARIANTS_PER_ITEM,
+  SESSION_CACHE_BUDGET_BYTES,
   SESSION_PERSIST_DEBOUNCE_MS,
   STORAGE_KEYS,
 } from '@shared/constants';
@@ -61,6 +67,18 @@ export class SessionStore {
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private persistQueue = Promise.resolve();
   private eventListeners: Array<(event: BackgroundToPanelEvent) => void> = [];
+  private activeTabs = new Set<number>();
+  private readonly lastAccess = new Map<number, number>();
+  private readonly snapshotBytes = new Map<number, number>();
+  private readonly itemBytes = new WeakMap<object, number>();
+  private readonly payloadBytes = new Map<number, number>();
+  private mutationVersion = 0;
+  private readonly closedTabs = new Set<number>();
+  private cacheEvictionListeners: Array<(tabId: number) => void> = [];
+
+  onCacheEvicted(listener: (tabId: number) => void): void {
+    this.cacheEvictionListeners.push(listener);
+  }
 
   onEvent(listener: (event: BackgroundToPanelEvent) => void): () => void {
     this.eventListeners.push(listener);
@@ -86,11 +104,23 @@ export class SessionStore {
     this.hydratePromise = (async () => {
       try {
         const allData = await chrome.storage.session.get(null);
+        const openTabs = typeof chrome.tabs?.query === 'function' ? await chrome.tabs.query({}) : undefined;
+        const openTabIds = openTabs ? new Set(openTabs.map((tab) => tab.id)) : undefined;
         for (const [key, value] of Object.entries(allData)) {
           if (key.startsWith(STORAGE_KEYS.TAB_SESSION_PREFIX)) {
             const tabId = Number(key.slice(STORAGE_KEYS.TAB_SESSION_PREFIX.length));
+            if (openTabIds && !openTabIds.has(tabId)) {
+              const downloads = (value as TabSessionSnapshot | undefined)?.downloads;
+              const pending = Object.values(downloads ?? {}).some((download) =>
+                ['queued', 'starting', 'in_progress'].includes(download.status));
+              if (!pending) {
+                await chrome.storage.session.remove(key);
+                continue;
+              }
+              this.closedTabs.add(tabId);
+            }
             if (!Number.isNaN(tabId) && value && typeof value === 'object') {
-              this.restoreSessionFromSnapshot(value as TabSessionSnapshot);
+              if (!this.sessions.has(tabId)) this.restoreSessionFromSnapshot(value as TabSessionSnapshot);
             }
           }
         }
@@ -98,6 +128,7 @@ export class SessionStore {
         console.warn('[WIC] Could not hydrate sessions from storage.session:', err);
       } finally {
         this.hydrated = true;
+        this.trimCache();
       }
     })();
 
@@ -175,9 +206,20 @@ export class SessionStore {
       downloads,
       dirty: false,
     });
+    this.snapshotBytes.set(snap.tabId, JSON.stringify(snap).length * 2);
+    const session = this.sessions.get(snap.tabId)!;
+    for (const item of [...session.items, ...session.videos]) this.trackItemBytes(session, item);
+  }
+
+  private trackItemBytes(session: InternalTabSession, item: ImageItem | VideoItem): void {
+    const bytes = JSON.stringify(item).length * 2;
+    this.payloadBytes.set(session.tabId,
+      (this.payloadBytes.get(session.tabId) ?? 0) - (this.itemBytes.get(item) ?? 0) + bytes);
+    this.itemBytes.set(item, bytes);
   }
 
   getOrCreateSession(tabId: number, pageUrl?: string, pageTitle?: string): InternalTabSession {
+    this.lastAccess.set(tabId, Date.now());
     let session = this.sessions.get(tabId);
     if (!session) {
       let domain: string | undefined;
@@ -213,6 +255,7 @@ export class SessionStore {
         dirty: true,
       };
       this.sessions.set(tabId, session);
+      this.trimCache(tabId);
       this.schedulePersist();
     } else if (pageTitle && !session.pageTitle) {
       session.pageTitle = pageTitle;
@@ -226,8 +269,43 @@ export class SessionStore {
   }
 
   getSnapshot(tabId: number): TabSessionSnapshot {
-    const session = this.getOrCreateSession(tabId);
-    return this.buildSnapshot(session);
+    const session = this.sessions.get(tabId);
+    if (session) {
+      this.lastAccess.set(tabId, Date.now());
+      return this.buildSnapshot(session);
+    }
+    // Merely displaying an unrelated tab must never allocate or persist a session.
+    return { tabId, revision: 0, scanEpoch: 1, scanStatus: 'unscanned',
+      items: [], videos: [], selectedIds: [], selectedVideoIds: [], downloads: {} };
+  }
+
+  announceSnapshot(tabId: number): void {
+    this.emitEvent({ channel: 'WIC_BG_TO_PANEL', type: 'EVENT_SESSION_REPLACED',
+      tabId, snapshot: this.getSnapshot(tabId) });
+  }
+
+  setActiveTabs(tabIds: Set<number>): void {
+    this.activeTabs = new Set(tabIds);
+    for (const id of tabIds) this.lastAccess.set(id, Date.now());
+    this.trimCache();
+  }
+
+  hasPendingDownloads(tabId: number): boolean {
+    return Array.from(this.sessions.get(tabId)?.downloads.values() ?? []).some((download) =>
+      ['queued', 'starting', 'in_progress'].includes(download.status));
+  }
+
+  private trimCache(protectTabId?: number): void {
+    let bytes = Array.from(this.snapshotBytes.values()).reduce((sum, size) => sum + size, 0);
+    const candidates = Array.from(this.sessions.keys())
+      .filter((id) => id !== protectTabId && !this.activeTabs.has(id) && !this.hasPendingDownloads(id))
+      .sort((a, b) => (this.lastAccess.get(a) ?? 0) - (this.lastAccess.get(b) ?? 0));
+    while ((this.sessions.size > MAX_CACHED_TAB_SESSIONS || bytes > SESSION_CACHE_BUDGET_BYTES) && candidates.length) {
+      const id = candidates.shift()!;
+      bytes -= this.snapshotBytes.get(id) ?? 0;
+      this.cacheEvictionListeners.forEach((listener) => listener(id));
+      this.removeTab(id);
+    }
   }
 
   private buildSnapshot(session: InternalTabSession): TabSessionSnapshot {
@@ -255,7 +333,8 @@ export class SessionStore {
 
   updatePageTitle(tabId: number, pageTitle: string): void {
     if (!pageTitle) return;
-    const session = this.getOrCreateSession(tabId);
+    const session = this.sessions.get(tabId);
+    if (!session) return;
     if (session.pageTitle !== pageTitle) {
       session.pageTitle = pageTitle;
       session.dirty = true;
@@ -269,6 +348,8 @@ export class SessionStore {
     statusMessage?: string,
   ): void {
     const session = this.getOrCreateSession(tabId);
+    if (session.scanStatus === scanStatus && session.statusMessage === statusMessage) return;
+    if (session.scanStatus === 'limit_reached' && scanStatus === 'watching') return;
     session.scanStatus = scanStatus;
     session.statusMessage = statusMessage;
     session.revision += 1;
@@ -296,11 +377,14 @@ export class SessionStore {
       domain = new URL(newPageUrl).hostname;
     } catch {}
 
+    const existed = this.sessions.has(tabId);
     const session = this.getOrCreateSession(tabId);
     session.pageUrl = newPageUrl;
     session.domain = domain;
     session.pageTitle = pageTitle;
-    session.scanEpoch += 1;
+    session.scanEpoch = existed ? session.scanEpoch + 1 : 1;
+    this.payloadBytes.delete(tabId);
+    this.snapshotBytes.delete(tabId);
     session.scanStatus = initialStatus;
     session.items = [];
     session.itemByPrimaryUrl.clear();
@@ -336,12 +420,14 @@ export class SessionStore {
     pageTitle?: string,
   ): void {
     const session = this.getOrCreateSession(tabId);
+    if (scanEpoch < session.scanEpoch) return;
     if (scanEpoch > session.scanEpoch) {
       session.scanEpoch = scanEpoch;
     }
     if (pageTitle && (!session.pageTitle || session.pageTitle !== pageTitle)) {
       session.pageTitle = pageTitle;
       session.dirty = true;
+      this.schedulePersist();
     }
 
     const upsertedMap = new Map<string, ImageItem>();
@@ -363,10 +449,11 @@ export class SessionStore {
         }
       }
 
+      let changed = false;
       if (!item) {
-        if (session.items.length >= MAX_ITEMS_PER_TAB) {
+        if (session.items.length >= MAX_ITEMS_PER_TAB || (this.payloadBytes.get(tabId) ?? 0) >= MAX_SESSION_PAYLOAD_BYTES) {
           if (session.scanStatus !== 'limit_reached') {
-            this.setScanStatus(tabId, 'limit_reached', '検出件数が上限 (2,000件) に達しました');
+            this.setScanStatus(tabId, 'limit_reached', '画像の件数またはキャッシュ容量の上限に達しました');
           }
           break;
         }
@@ -385,20 +472,24 @@ export class SessionStore {
         session.items.push(item);
         session.itemByPrimaryUrl.set(group.primaryUrl, item);
         session.itemById.set(itemId, item);
+        changed = true;
       }
 
-      session.itemByVariantUrl.set(group.primaryUrl, item);
-
-      if (!session.seenOccurrenceKeys.has(group.occurrenceKey)) {
+      if (session.seenOccurrenceKeys.size < MAX_OCCURRENCE_KEYS_PER_TAB && !session.seenOccurrenceKeys.has(group.occurrenceKey)) {
         session.seenOccurrenceKeys.add(group.occurrenceKey);
         item.occurrenceCount += 1;
+        changed = true;
       }
 
       for (const rawVar of group.variants) {
+        if ((this.payloadBytes.get(tabId) ?? 0) >= MAX_SESSION_PAYLOAD_BYTES &&
+          !item.variants.some((variant) => variant.url === rawVar.url)) continue;
+        if (item.variants.length >= MAX_VARIANTS_PER_ITEM && !item.variants.some((v) => v.url === rawVar.url)) continue;
         session.itemByVariantUrl.set(rawVar.url, item);
 
         if (!item.sources.includes(rawVar.source)) {
           item.sources.push(rawVar.source);
+          changed = true;
         }
 
         let existingVar = item.variants.find((v) => v.url === rawVar.url);
@@ -414,27 +505,40 @@ export class SessionStore {
             largeDataRefId: rawVar.largeDataRefId,
           };
           item.variants.push(existingVar);
+          changed = true;
         } else {
           if (!existingVar.roles.includes(rawVar.role)) {
             existingVar.roles.push(rawVar.role);
+            changed = true;
           }
-          if (rawVar.descriptor && !existingVar.descriptors.includes(rawVar.descriptor)) {
+          if (rawVar.descriptor && existingVar.descriptors.length < MAX_VARIANTS_PER_ITEM && !existingVar.descriptors.includes(rawVar.descriptor)) {
             existingVar.descriptors.push(rawVar.descriptor);
+            changed = true;
           }
           if (rawVar.naturalWidth && !existingVar.naturalWidth) {
             existingVar.naturalWidth = rawVar.naturalWidth;
+            changed = true;
           }
           if (rawVar.naturalHeight && !existingVar.naturalHeight) {
             existingVar.naturalHeight = rawVar.naturalHeight;
+            changed = true;
+          }
+          if (rawVar.largeDataRefId && existingVar.largeDataRefId !== rawVar.largeDataRefId) {
+            existingVar.largeDataRefId = rawVar.largeDataRefId;
+            changed = true;
           }
         }
       }
 
       if (!item.manualVariantSelected) {
-        item.selectedUrl = pickBestVariantUrl(item.variants);
+        const selectedUrl = pickBestVariantUrl(item.variants);
+        if (selectedUrl !== item.selectedUrl) { item.selectedUrl = selectedUrl; changed = true; }
       }
 
-      upsertedMap.set(item.itemId, item);
+      if (changed) {
+        this.trackItemBytes(session, item);
+        upsertedMap.set(item.itemId, item);
+      }
     }
 
     if (upsertedMap.size > 0) {
@@ -463,6 +567,7 @@ export class SessionStore {
     if (videoGroups.length === 0) return;
 
     const session = this.getOrCreateSession(tabId, pageUrl, pageTitle);
+    if (scanEpoch < session.scanEpoch) return;
     if (scanEpoch > session.scanEpoch) {
       session.scanEpoch = scanEpoch;
     }
@@ -475,12 +580,16 @@ export class SessionStore {
     if (pageTitle && (!session.pageTitle || session.pageTitle !== pageTitle)) {
       session.pageTitle = pageTitle;
       session.dirty = true;
+      this.schedulePersist();
     }
 
     const upsertedVideos = new Map<string, VideoItem>();
 
-    for (const group of videoGroups) {
+    for (const rawGroup of videoGroups) {
+      const group = rawGroup.posterUrl && rawGroup.posterUrl.length > INLINE_DATA_URL_SESSION_MAX_CHARS
+        ? { ...rawGroup, posterUrl: undefined } : rawGroup;
       let video = session.videoByPrimaryUrl.get(group.primaryUrl);
+      let changed = false;
 
       if (!video) {
         video = session.videoByVariantUrl.get(group.primaryUrl);
@@ -511,7 +620,8 @@ export class SessionStore {
       }
 
       if (!video) {
-        if (session.videos.length >= MAX_VIDEOS_PER_TAB) {
+        if (session.videos.length >= MAX_VIDEOS_PER_TAB || (this.payloadBytes.get(tabId) ?? 0) >= MAX_SESSION_PAYLOAD_BYTES) {
+          this.setScanStatus(tabId, 'limit_reached', '動画の件数またはキャッシュ容量の上限に達しました');
           break;
         }
 
@@ -532,31 +642,39 @@ export class SessionStore {
         session.videos.push(video);
         session.videoByPrimaryUrl.set(group.primaryUrl, video);
         session.videoById.set(itemId, video);
+        changed = true;
       } else {
         // Enrich metadata passively when DOM/OGP/JSON-LD supplements an earlier network entry
         if (group.durationSec && !video.durationSec) {
           video.durationSec = group.durationSec;
+          changed = true;
         }
         if (group.isLive !== undefined && video.isLive === undefined) {
           video.isLive = group.isLive;
+          changed = true;
         }
-        if (group.posterUrl && (!video.posterUrl || video.posterUrl.startsWith('data:'))) {
+        if (group.posterUrl && (this.payloadBytes.get(tabId) ?? 0) < MAX_SESSION_PAYLOAD_BYTES &&
+          group.posterUrl !== video.posterUrl && (!video.posterUrl || video.posterUrl.startsWith('data:'))) {
           video.posterUrl = group.posterUrl;
+          changed = true;
         }
       }
 
-      session.videoByVariantUrl.set(group.primaryUrl, video);
-
-      if (!session.seenOccurrenceKeys.has(group.occurrenceKey)) {
+      if (session.seenOccurrenceKeys.size < MAX_OCCURRENCE_KEYS_PER_TAB && !session.seenOccurrenceKeys.has(group.occurrenceKey)) {
         session.seenOccurrenceKeys.add(group.occurrenceKey);
         video.occurrenceCount += 1;
+        changed = true;
       }
 
       for (const rawVar of group.variants) {
+        if ((this.payloadBytes.get(tabId) ?? 0) >= MAX_SESSION_PAYLOAD_BYTES &&
+          !video.variants.some((variant) => variant.url === rawVar.url)) continue;
+        if (video.variants.length >= MAX_VARIANTS_PER_ITEM && !video.variants.some((v) => v.url === rawVar.url)) continue;
         session.videoByVariantUrl.set(rawVar.url, video);
 
         if (!video.sources.includes(rawVar.source)) {
           video.sources.push(rawVar.source);
+          changed = true;
         }
 
         const format = inferVideoFormat(rawVar.url, rawVar.mimeHint);
@@ -584,44 +702,58 @@ export class SessionStore {
             largeDataRefId: rawVar.largeDataRefId,
           };
           video.variants.push(existingVar);
+          changed = true;
         } else {
           if (!existingVar.roles.includes(rawVar.role)) {
             existingVar.roles.push(rawVar.role);
+            changed = true;
           }
-          if (rawVar.descriptor && !existingVar.descriptors.includes(rawVar.descriptor)) {
+          if (rawVar.descriptor && existingVar.descriptors.length < MAX_VARIANTS_PER_ITEM && !existingVar.descriptors.includes(rawVar.descriptor)) {
             existingVar.descriptors.push(rawVar.descriptor);
+            changed = true;
           }
           if (existingVar.format === 'unknown' && format !== 'unknown') {
             existingVar.format = format;
+            changed = true;
           }
           if (rawVar.videoWidth && !existingVar.videoWidth) {
             existingVar.videoWidth = rawVar.videoWidth;
+            changed = true;
           }
           if (rawVar.videoHeight && !existingVar.videoHeight) {
             existingVar.videoHeight = rawVar.videoHeight;
+            changed = true;
           }
           if (rawVar.fileSizeBytes && !existingVar.fileSizeBytes) {
             existingVar.fileSizeBytes = rawVar.fileSizeBytes;
+            changed = true;
           }
-          if (rawVar.isDrmProtected || rawVar.isMseStream) {
+          if ((rawVar.isDrmProtected || rawVar.isMseStream) &&
+            (existingVar.deliveryType !== deliveryType || existingVar.readiness !== readiness)) {
             existingVar.deliveryType = deliveryType;
             existingVar.readiness = readiness;
             existingVar.blockReason = blockReason;
+            changed = true;
           }
         }
       }
 
       if (!video.manualVariantSelected) {
-        video.selectedUrl = pickBestVideoVariantUrl(video.variants);
+        const selectedUrl = pickBestVideoVariantUrl(video.variants);
+        if (video.selectedUrl !== selectedUrl) { video.selectedUrl = selectedUrl; changed = true; }
       }
 
       // If currently selected video became blocked (e.g. DRM detected), clean up selection
       const activeVar = getActiveVideoVariant(video.variants, video.selectedUrl);
       if (activeVar && activeVar.readiness !== 'ready' && session.selectedVideoIds.has(video.itemId)) {
         session.selectedVideoIds.delete(video.itemId);
+        changed = true;
       }
 
-      upsertedVideos.set(video.itemId, video);
+      if (changed) {
+        this.trackItemBytes(session, video);
+        upsertedVideos.set(video.itemId, video);
+      }
     }
 
     if (upsertedVideos.size > 0) {
@@ -748,13 +880,15 @@ export class SessionStore {
           video.isLive = params.isLive;
           touched = true;
         }
-        if (params.posterUrl && !video.posterUrl) {
+        if (params.posterUrl && params.posterUrl.length <= INLINE_DATA_URL_SESSION_MAX_CHARS && !video.posterUrl &&
+          (this.payloadBytes.get(tabId) ?? 0) < MAX_SESSION_PAYLOAD_BYTES) {
           video.posterUrl = params.posterUrl;
           touched = true;
         }
       }
 
       if (touched) {
+        this.trackItemBytes(session, video);
         if (!video.manualVariantSelected) {
           video.selectedUrl = pickBestVideoVariantUrl(video.variants);
         }
@@ -796,7 +930,7 @@ export class SessionStore {
 
   /**
    * Merges a video URL observed via `chrome.webRequest` response headers into an active tab session.
-   * Links post-redirect CDN URLs (e.g. `www47.tokyomotion.net/.../3741005.mp4`) back into the
+   * Links post-redirect CDN URLs (e.g. `www47.tokyomotion.net/.../1234567.mp4`) back into the
    * originating `<video><source>` item via `redirectChainUrls` without duplicating cards.
    */
   mergeNetworkDetectedVideo(
@@ -822,10 +956,11 @@ export class SessionStore {
     for (const srcUrl of chainUrls) {
       let set = session.redirectTargetsBySourceUrl.get(srcUrl);
       if (!set) {
+        if (session.redirectTargetsBySourceUrl.size >= MAX_VIDEOS_PER_TAB * MAX_VARIANTS_PER_ITEM) continue;
         set = new Set();
         session.redirectTargetsBySourceUrl.set(srcUrl, set);
       }
-      set.add(params.url);
+      if (set.size < MAX_VARIANTS_PER_ITEM) set.add(params.url);
     }
 
     // Look up an existing VideoItem by final URL or any URL in the redirect chain
@@ -868,6 +1003,9 @@ export class SessionStore {
     }
 
     if (matchedVideo) {
+      const knownVariant = matchedVideo.variants.some((variant) => variant.url === params.url);
+      if (!knownVariant && (matchedVideo.variants.length >= MAX_VARIANTS_PER_ITEM ||
+        (this.payloadBytes.get(tabId) ?? 0) >= MAX_SESSION_PAYLOAD_BYTES)) return;
       const format = inferVideoFormat(params.url, params.mimeHint);
       const { deliveryType, readiness, blockReason } = classifyVideoDeliveryAndReadiness({
         url: params.url,
@@ -917,7 +1055,7 @@ export class SessionStore {
         }
         if (sourceVariant) {
           for (const desc of sourceVariant.descriptors) {
-            if (!existingVar.descriptors.includes(desc)) {
+            if (existingVar.descriptors.length < MAX_VARIANTS_PER_ITEM && !existingVar.descriptors.includes(desc)) {
               existingVar.descriptors.push(desc);
               modified = true;
             }
@@ -926,6 +1064,7 @@ export class SessionStore {
       }
 
       if (modified) {
+        this.trackItemBytes(session, matchedVideo);
         if (!matchedVideo.manualVariantSelected) {
           matchedVideo.selectedUrl = pickBestVideoVariantUrl(matchedVideo.variants);
         }
@@ -997,6 +1136,8 @@ export class SessionStore {
     }
 
     for (const pv of parsed.variants) {
+      if (!video.variants.some((variant) => variant.url === pv.url) &&
+        (video.variants.length >= MAX_VARIANTS_PER_ITEM || (this.payloadBytes.get(tabId) ?? 0) >= MAX_SESSION_PAYLOAD_BYTES)) break;
       session.videoByVariantUrl.set(pv.url, video);
       let existing = video.variants.find((v) => v.url === pv.url);
       if (!existing) {
@@ -1020,13 +1161,15 @@ export class SessionStore {
           bitrateBps: pv.bandwidthBps,
         };
         video.variants.push(newVariant);
+        this.trackItemBytes(session, video);
         addedCount++;
       }
     }
 
     if (addedCount > 0 || parsed.isDrmEncrypted) {
-      if (!video.manualVariantSelected && parsed.variants[0]) {
-        video.selectedUrl = parsed.variants[0].url;
+      const bestRetained = parsed.variants.find((variant) => video.variants.some((kept) => kept.url === variant.url));
+      if (!video.manualVariantSelected && bestRetained) {
+        video.selectedUrl = bestRetained.url;
       }
       session.revision += 1;
       session.dirty = true;
@@ -1309,6 +1452,7 @@ export class SessionStore {
       revision: session.revision,
       updatedDownloads: [state],
     });
+    if (this.closedTabs.has(tabId) && !this.hasPendingDownloads(tabId)) void this.removeTab(tabId);
   }
 
   /**
@@ -1321,6 +1465,12 @@ export class SessionStore {
   ): void {
     if (updates.length === 0) return;
     const session = this.sessions.get(tabId);
+    updates = updates.filter((update) => {
+      const previous = session?.downloads.get(update.itemId);
+      return previous?.status === 'in_progress' && (previous.bytesReceived !== update.bytesReceived ||
+        (update.totalBytes !== undefined && previous.totalBytes !== update.totalBytes));
+    });
+    if (updates.length === 0) return;
     if (session) {
       for (const u of updates) {
         const existing = session.downloads.get(u.itemId);
@@ -1345,36 +1495,84 @@ export class SessionStore {
     return Array.from(this.sessions.keys());
   }
 
-  removeTab(tabId: number): void {
+  removeTab(tabId: number): Promise<void> {
+    if (this.hasPendingDownloads(tabId)) {
+      this.closedTabs.add(tabId);
+      return Promise.resolve();
+    }
+    if (!this.sessions.has(tabId) && this.hydrated) return Promise.resolve();
     this.sessions.delete(tabId);
-    chrome.storage.session
+    this.closedTabs.delete(tabId);
+    this.lastAccess.delete(tabId);
+    this.snapshotBytes.delete(tabId);
+    this.payloadBytes.delete(tabId);
+    return chrome.storage.session
       .remove(`${STORAGE_KEYS.TAB_SESSION_PREFIX}${tabId}`)
       .catch(() => {});
   }
 
   private schedulePersist(): void {
+    this.mutationVersion += 1;
     if (this.persistTimer !== null) return;
-
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      this.persistQueue = this.persistQueue.then(async () => {
-        const toSave: Record<string, TabSessionSnapshot> = {};
-        for (const [tabId, session] of this.sessions) {
-          if (session.dirty) {
-            toSave[`${STORAGE_KEYS.TAB_SESSION_PREFIX}${tabId}`] = this.buildSnapshot(session);
-            session.dirty = false;
-          }
-        }
-
-        if (Object.keys(toSave).length > 0) {
-          try {
-            await chrome.storage.session.set(toSave);
-          } catch (err) {
-            console.warn('[WIC] Failed to persist dirty tab sessions to storage.session:', err);
-          }
-        }
-      });
+      void this.flush();
     }, SESSION_PERSIST_DEBOUNCE_MS);
+  }
+
+  flush(): Promise<void> {
+    if (this.persistTimer !== null) clearTimeout(this.persistTimer);
+    this.persistTimer = null;
+    this.persistQueue = this.persistQueue.catch(() => {}).then(async () => {
+      const version = this.mutationVersion;
+      const dirtySessions = Array.from(this.sessions.values()).filter((session) => session.dirty);
+      if (dirtySessions.length === 0) return;
+      const toSave: Record<string, TabSessionSnapshot> = {};
+      for (const session of dirtySessions) {
+        const snapshot = this.buildSnapshot(session);
+        // Captured frame thumbnails are disposable and regenerated on resume.
+        snapshot.videos = snapshot.videos.map((video) => video.posterUrl?.startsWith('data:')
+          ? { ...video, posterUrl: undefined } : video);
+        this.snapshotBytes.set(session.tabId, JSON.stringify(snapshot).length * 2);
+        toSave[`${STORAGE_KEYS.TAB_SESSION_PREFIX}${session.tabId}`] = snapshot;
+      }
+      this.trimCache();
+      for (const session of dirtySessions) {
+        if (!this.sessions.has(session.tabId)) delete toSave[`${STORAGE_KEYS.TAB_SESSION_PREFIX}${session.tabId}`];
+      }
+      if (Object.keys(toSave).length === 0) return;
+      try {
+        await chrome.storage.session.set(toSave);
+      } catch (error) {
+        if (!/quota|QUOTA_BYTES/i.test(String(error))) {
+          console.warn('[WIC] Session persistence failed; retaining dirty state:', error);
+          return;
+        }
+        // Evict only inactive cache entries. Active downloads/visible tabs are protected.
+        const evictable = Array.from(this.sessions.keys()).filter((id) =>
+          !this.activeTabs.has(id) && !this.hasPendingDownloads(id));
+        if (evictable.length === 0) return;
+        await Promise.all(evictable.map((id) => {
+          this.cacheEvictionListeners.forEach((listener) => listener(id));
+          return this.removeTab(id);
+        }));
+        for (const id of evictable) {
+          delete toSave[`${STORAGE_KEYS.TAB_SESSION_PREFIX}${id}`];
+        }
+        try { await chrome.storage.session.set(toSave); }
+        catch (retryError) {
+          console.warn('[WIC] Session quota retry failed; retaining dirty state:', retryError);
+          return;
+        }
+      }
+      if (version === this.mutationVersion) {
+        for (const session of dirtySessions) session.dirty = false;
+      }
+      const removedKeys = dirtySessions.filter((session) => !this.sessions.has(session.tabId))
+        .map((session) => `${STORAGE_KEYS.TAB_SESSION_PREFIX}${session.tabId}`);
+      if (removedKeys.length > 0) await chrome.storage.session.remove(removedKeys);
+    });
+    return this.persistQueue;
   }
 }
 

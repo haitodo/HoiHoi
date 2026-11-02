@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { PORT_NAMES } from '@shared/constants';
+import { useCallback, useMemo, useState } from 'react';
 import { extractFilenameForSort } from '@shared/filename-utils';
 import type {
   CardSize,
@@ -29,6 +28,7 @@ import { VideoFilterBar } from './components/VideoFilterBar';
 import { VideoGrid } from './components/VideoGrid';
 import { VideoLightboxModal } from './components/VideoLightboxModal';
 import { useActiveTabId } from './hooks/useActiveTabId';
+import { usePanelActivity } from './hooks/usePanelActivity';
 import { useBlobStreamBridge } from './hooks/useBlobStreamBridge';
 import { useTabSession } from './hooks/useTabSession';
 import { useVideoMetadataProber } from './hooks/useVideoMetadataProber';
@@ -161,6 +161,8 @@ export function App() {
     retryFailedDownloads,
   } = useTabSession(activeTabId);
 
+  const isPanelVisible = usePanelActivity(activeTabId, snapshot);
+
   const {
     isProbing: isVideoProbing,
     progress: videoProbeProgress,
@@ -170,27 +172,9 @@ export function App() {
   } = useVideoMetadataProber({
     videos: snapshot?.videos ?? [],
     onReportVideoMetadata: reportVideoMetadata,
+    targetTabId: activeTabId,
+    enabled: isPanelVisible,
   });
-
-  // Maintain long-lived connection with Background SW while Side Panel is open.
-  useEffect(() => {
-    let port: chrome.runtime.Port | null = null;
-    try {
-      port = chrome.runtime.connect({ name: PORT_NAMES.SIDEPANEL_LIFECYCLE });
-    } catch {}
-    return () => {
-      try {
-        port?.disconnect();
-      } catch {}
-    };
-  }, []);
-
-  // Automatically trigger passive scan when Side Panel opens on an unscanned tab
-  useEffect(() => {
-    if (activeTabId && snapshot && snapshot.scanStatus === 'unscanned') {
-      void triggerRescan();
-    }
-  }, [activeTabId, snapshot?.scanStatus, triggerRescan]);
 
   // Active Mode ('image' | 'video')
   const [mediaMode, setMediaModeState] = useState<MediaMode>(() => {
@@ -821,6 +805,7 @@ export function App() {
             />
           ) : (
             <VideoGrid
+              isActive={isPanelVisible}
               videos={filteredVideos}
               selectedVideoIds={selectedVideoIdsSet}
               downloads={snapshot?.downloads || {}}
@@ -863,7 +848,7 @@ export function App() {
         />
       )}
 
-      {mediaMode === 'video' && previewVideo && (
+      {isPanelVisible && mediaMode === 'video' && previewVideo && (
         <VideoLightboxModal
           videos={filteredVideos}
           currentIndex={previewVideoIndex}

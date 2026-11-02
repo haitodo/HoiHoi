@@ -1,4 +1,5 @@
 import { PORT_NAMES } from '@shared/constants';
+import { readTextLimited } from '@shared/response-utils';
 import {
   isContentToBgMessage,
   isPanelToBgMessage,
@@ -7,12 +8,13 @@ import {
 } from '@shared/messages';
 import { downloadManager } from './download-manager';
 import { networkSniffer } from './network-sniffer';
+import { PanelSubscriptions } from './panel-subscriptions';
 import { refererRuleManager } from './referer-rules';
 import { sessionStore } from './session-store';
 import {
   bootstrapTabScan,
   handleTabNavigation,
-  stopAllScanners,
+  stopTabScanner,
   triggerTabRescan,
 } from './tab-coordinator';
 
@@ -52,28 +54,51 @@ chrome.action.onClicked.addListener((tab) => {
   } catch {}
 });
 
-// Connect port listener to track Side Panel lifecycle
-let openSidePanelPorts = 0;
+let previousTargets = new Set<number>();
+const panels = new PanelSubscriptions((tabIds) => {
+  const addedTargets = Array.from(tabIds).filter((id) => !previousTargets.has(id));
+  for (const id of previousTargets) {
+    if (!tabIds.has(id) && !sessionStore.hasPendingDownloads(id)) void stopTabScanner(id);
+  }
+  previousTargets = new Set(tabIds);
+  refreshNetworkTargets();
+  if (tabIds.size > 0) void sessionStore.ensureHydrated().then(() => {
+    refreshNetworkTargets();
+    for (const id of addedTargets) {
+      if (panels.watches(id) && sessionStore.getSession(id)) sessionStore.announceSnapshot(id);
+    }
+  });
+  sessionStore.setActiveTabs(tabIds);
+  downloadManager.setProgressSubscribers(tabIds);
+  if (tabIds.size === 0) {
+    void refererRuleManager.clearIdleRulesIfPossible();
+    void sessionStore.flush();
+  }
+});
+
+sessionStore.onCacheEvicted((tabId) => { void stopTabScanner(tabId, true); });
+
+function refreshNetworkTargets(): void {
+  networkSniffer.setWatchedTabs(Array.from(panels.getTabIds()).filter((id) => {
+    const status = sessionStore.getSession(id)?.scanStatus;
+    return status === 'scanning' || status === 'watching' || status === 'limit_reached';
+  }));
+}
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === PORT_NAMES.SIDEPANEL_LIFECYCLE) {
-    openSidePanelPorts += 1;
-    networkSniffer.startSniffing();
-
-    port.onDisconnect.addListener(() => {
-      openSidePanelPorts = Math.max(0, openSidePanelPorts - 1);
-      if (openSidePanelPorts === 0) {
-        // Side Panel closed -> stop webRequest sniffer, idle DNR rules, and content observers
-        networkSniffer.stopSniffing();
-        void refererRuleManager.clearIdleRulesIfPossible();
-        void stopAllScanners();
-      }
-    });
+    panels.add(port);
   }
 });
 
 // Broadcast session events to any open extension views (Side Panel)
 sessionStore.onEvent((event: BackgroundToPanelEvent) => {
+  if (event.type === 'EVENT_DOWNLOADS_UPDATED' && !panels.watches(event.tabId) &&
+    !sessionStore.hasPendingDownloads(event.tabId)) void stopTabScanner(event.tabId);
+  if (!panels.watches(event.tabId)) return;
+  if (event.type === 'EVENT_SESSION_REPLACED' || event.type === 'EVENT_SCAN_STATUS_CHANGED') {
+    refreshNetworkTargets();
+  }
   try {
     chrome.runtime.sendMessage(event).catch(() => {
       // Side Panel might be closed or switching tabs; safe to ignore
@@ -92,6 +117,12 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     void (async () => {
       try {
         await sessionStore.ensureHydrated();
+
+        const session = sessionStore.getSession(tabId);
+        if (!session || message.scanEpoch !== session.scanEpoch) {
+          sendResponse({ ok: true });
+          return;
+        }
 
         switch (message.type) {
           case 'CONTENT_SCAN_BATCH': {
@@ -160,6 +191,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     void (async () => {
       try {
         await sessionStore.ensureHydrated();
+        await downloadManager.init();
         let tabId = message.tabId;
 
         // Fallback: If tabId is invalid or <= 0, query active tab directly from Background
@@ -175,16 +207,25 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
         switch (message.type) {
           case 'PANEL_GET_TAB_SESSION': {
             let snapshot = sessionStore.getSnapshot(tabId);
-            if (snapshot.scanStatus === 'unscanned' && !snapshot.pageUrl && tabId > 0) {
+            if (snapshot.pageUrl && snapshot.scanStatus !== 'unscanned') {
               try {
                 const tab = await chrome.tabs.get(tabId);
-                if (tab.url) {
-                  sessionStore.getOrCreateSession(tabId, tab.url);
+                if (tab.url && tab.url !== snapshot.pageUrl) {
+                  handleTabNavigation(tabId);
                   snapshot = sessionStore.getSnapshot(tabId);
                 }
               } catch {}
             }
-            void refererRuleManager.setActiveTabContext(snapshot.pageUrl);
+            if (snapshot.scanStatus === 'unscanned' && !snapshot.pageUrl && tabId > 0) {
+              try {
+                const tab = await chrome.tabs.get(tabId);
+                if (tab.url) {
+                  snapshot = { ...snapshot, pageUrl: tab.url, pageTitle: tab.title,
+                    domain: new URL(tab.url).hostname };
+                }
+              } catch {}
+            }
+            void refererRuleManager.setActiveTabContext(snapshot.scanStatus === 'unscanned' ? undefined : snapshot.pageUrl);
             sendResponse({ ok: true, data: snapshot });
             break;
           }
@@ -269,7 +310,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
                 });
                 break;
               }
-              manifestText = (await resp.text()).slice(0, 512_000);
+              manifestText = await readTextLimited(resp, 512_000);
             }
 
             const result = sessionStore.applyParsedHlsManifest(
@@ -283,7 +324,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
           }
 
           case 'PANEL_ENQUEUE_DOWNLOADS': {
-            downloadManager.enqueue(tabId, message.itemIds);
+            downloadManager.enqueue(tabId, message.itemIds, message.panelId);
             sendResponse({ ok: true });
             break;
           }
@@ -331,7 +372,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
           }
 
           case 'PANEL_RETRY_FAILED_DOWNLOADS': {
-            downloadManager.retryFailed(tabId, message.itemIds, message.mediaMode);
+            downloadManager.retryFailed(tabId, message.itemIds, message.mediaMode, message.panelId);
             sendResponse({ ok: true });
             break;
           }
@@ -349,13 +390,13 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 });
 
 chrome.downloads.onChanged.addListener((delta) => {
-  downloadManager.handleDownloadDelta(delta);
+  void downloadManager.init().then(() => downloadManager.handleDownloadDelta(delta));
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'loading') {
     handleTabNavigation(tabId);
-  } else if (changeInfo.title) {
+  } else if (changeInfo.title && panels.watches(tabId)) {
     sessionStore.updatePageTitle(tabId, changeInfo.title);
   }
 });
@@ -363,3 +404,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   sessionStore.removeTab(tabId);
 });
+
+// A sleeping MV3 worker is allowed. Existing panels re-announce subscriptions only on
+// this real wakeup; page observation remains owned by their direct content ports.
+void chrome.runtime.sendMessage({ type: 'HOIHOI_BACKGROUND_READY' }).catch(() => {});

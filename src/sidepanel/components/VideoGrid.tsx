@@ -5,6 +5,7 @@ import type { HlsStreamMergeProgress } from '../utils/hls-saver';
 import { VideoCard } from './VideoCard';
 
 interface VideoGridProps {
+  isActive?: boolean;
   videos: VideoItem[];
   selectedVideoIds: Set<string>;
   downloads: Record<string, ItemDownloadState>;
@@ -63,6 +64,7 @@ function calculateVideoColumns(containerWidth: number, size: CardSize): number {
 }
 
 export const VideoGrid: React.FC<VideoGridProps> = ({
+  isActive = true,
   videos,
   selectedVideoIds,
   downloads,
@@ -80,6 +82,10 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   const [columnCount, setColumnCount] = useState(1);
   // Singleton inline player guard: at most ONE <video> element can ever exist in the grid
   const [activePlayingId, setActivePlayingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isActive) setActivePlayingId(null);
+  }, [isActive]);
 
   useEffect(() => {
     const el = containerRef.current;

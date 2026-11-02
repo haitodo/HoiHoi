@@ -132,7 +132,7 @@ describe('video-utils', () => {
       expect(parseContentRangeTotalBytes('bytes 0-4095/*')).toBeNull();
       expect(isKnownAdOrTrackerVideoUrl('https://syndication.realsrv.com/splash.php')).toBe(true);
       expect(isKnownAdOrTrackerVideoUrl('https://cdn.exoclick.com/preroll.mp4')).toBe(true);
-      expect(isKnownAdOrTrackerVideoUrl('https://www47.tokyomotion.net/video/abc/3741005.mp4')).toBe(false);
+      expect(isKnownAdOrTrackerVideoUrl('https://www47.tokyomotion.net/video/abc/1234567.mp4')).toBe(false);
       expect(stripByteRangeQueryParam('https://cdn.example.com/clip.mp4?token=1&range=0-65535')).toBe(
         'https://cdn.example.com/clip.mp4?token=1',
       );
@@ -174,26 +174,26 @@ describe('video-utils', () => {
       expect(
         pickBestVideoVariantUrl([
           {
-            url: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+            url: 'https://www.tokyomotion.net/vsrc/sd/test-sd-source',
             format: 'mp4',
             readiness: 'ready',
             roles: ['source-tag'],
             descriptors: ['SD'],
           },
           {
-            url: 'https://www.tokyomotion.net/vsrc/hd/9f11ccb5602e683a9981',
+            url: 'https://www.tokyomotion.net/vsrc/hd/test-hd-source',
             format: 'mp4',
             readiness: 'ready',
             roles: ['source-tag'],
             descriptors: ['HD'],
           },
         ]),
-      ).toBe('https://www.tokyomotion.net/vsrc/hd/9f11ccb5602e683a9981');
+      ).toBe('https://www.tokyomotion.net/vsrc/hd/test-hd-source');
 
       expect(
         pickBestVideoVariantUrl([
           {
-            url: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+            url: 'https://www.tokyomotion.net/vsrc/sd/test-sd-source',
             format: 'mp4',
             readiness: 'ready',
             roles: ['source-tag'],
@@ -201,7 +201,7 @@ describe('video-utils', () => {
             fileSizeBytes: 13_364_887,
           },
           {
-            url: 'https://www47.tokyomotion.net/video/5bef/iphone/3741005.mp4?md5=LBd&expires=179',
+            url: 'https://www47.tokyomotion.net/video/5bef/iphone/1234567.mp4?md5=test&expires=2000000000',
             format: 'mp4',
             readiness: 'ready',
             roles: ['network'],
@@ -209,7 +209,7 @@ describe('video-utils', () => {
             fileSizeBytes: 13_364_887,
           },
         ]),
-      ).toBe('https://www47.tokyomotion.net/video/5bef/iphone/3741005.mp4?md5=LBd&expires=179');
+      ).toBe('https://www47.tokyomotion.net/video/5bef/iphone/1234567.mp4?md5=test&expires=2000000000');
     });
   });
 
@@ -353,16 +353,16 @@ describe('video-utils', () => {
       });
       expect(mergedHlsName).toBe('Anime Episode 1/episode_01_1080p.ts');
 
-      // Redirected CDN URL basename (e.g. TokyoMotion /vsrc/sd/... -> .../3741005.mp4)
+      // Redirected CDN URL basename (e.g. TokyoMotion /vsrc/sd/... -> .../1234567.mp4)
       const redirectedName = buildSafeVideoDownloadFilename({
-        targetUrl: 'https://www.tokyomotion.net/vsrc/sd/8a52abb5602e683a9981',
+        targetUrl: 'https://www.tokyomotion.net/vsrc/sd/test-sd-source',
         resolvedUrl:
-          'https://www47.tokyomotion.net/video/5bef0447760e69bf70c8ff816085f40d/6ae73a89/iphone/3741005.mp4?md5=LBd_l-x41sPt-IllUbwDeg&expires=1793542297',
+          'https://www47.tokyomotion.net/video/test-cdn-path/test-session/iphone/1234567.mp4?md5=test&expires=2000000000',
         pageTitle: 'TokyoMotion Sample Video',
         domain: 'www.tokyomotion.net',
         format: 'mp4',
       });
-      expect(redirectedName).toBe('TokyoMotion Sample Video/3741005.mp4');
+      expect(redirectedName).toBe('TokyoMotion Sample Video/1234567.mp4');
 
       // Content-Disposition RFC 5987 UTF-8 filename priority
       expect(

@@ -140,6 +140,7 @@ export type DownloadErrorCategory =
 
 /** Per-item download state tracked by Background Service Worker (`spec.md` §7.2, §7.3). */
 export interface ItemDownloadState {
+  panelId?: string;
   itemId: string;
   targetUrl: string;
   status: DownloadStatus;
@@ -378,4 +379,6 @@ export interface ActiveDownloadIndexEntry {
   startedAt: number;
   /** Optional object URL in Side Panel / extension scope to revoke once download finishes. */
   revokeObjectUrl?: string;
+  /** Keep scoped headers until direct HTTP download completion. */
+  refererRuleKey?: string;
 }

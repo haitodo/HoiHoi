@@ -26,14 +26,61 @@ out/
 *.pfx
 *.p12
 *.pkcs12
+*.jks
+*.keystore
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+# public/manifest.json contains a PUBLIC key required for the stable extension ID.
 
 # -----------------------------------------------------------------------------
 # Environment variables & local credentials
 # -----------------------------------------------------------------------------
-.env
-.env.local
-.env.*.local
+.env*
+!.env.example
+!.env.sample
+!.env.template
+!.env.*.example
+!.env.*.sample
+!.env.*.template
 *.local
+.npmrc
+.pnpmrc
+.netrc
+_netrc
+.pypirc
+.git-credentials
+.aws/
+.azure/
+.ssh/
+.gnupg/
+secrets/
+secrets*.json
+secrets*.yaml
+secrets*.yml
+credentials*.json
+*.credentials.json
+service-account*.json
+service_account*.json
+token.json
+tokens.json
+auth.json
+
+# Browser sessions can contain cookies, bearer tokens, and private URLs.
+.auth/
+playwright/.auth/
+storage-state*.json
+storageState*.json
+cookies*.json
+cookies*.txt
+*.har
+*.heapsnapshot
+*.cpuprofile
+*.trace.json
+/.browser-profile/
+/.chrome-profile/
+/.edge-profile/
 
 # -----------------------------------------------------------------------------
 # Logs
@@ -52,6 +99,12 @@ pnpm-debug.log*
 coverage/
 .nyc_output/
 .vitest/
+.vite/
+.cache/
+.playwright/
+playwright-report/
+test-results/
+blob-report/
 .eslintcache
 
 # -----------------------------------------------------------------------------
@@ -65,15 +118,28 @@ ehthumbs.db
 [Dd]esktop.ini
 $RECYCLE.BIN/
 *.tmp
+*.bak
+*.backup
+*.orig
+*.rej
+tmp/
+temp/
+.tmp/
 *~
 
 # -----------------------------------------------------------------------------
 # Editor / IDE configuration
 # -----------------------------------------------------------------------------
 .idea/
+.vs/
+.history/
 .vscode/*
 !.vscode/extensions.json
-!.vscode/settings.json
+# Keep personal assistant state and machine-specific MCP credentials local.
+/.codex/
+/.claude/
+/.cursor/
+/.mcp.json
 *.suo
 *.ntvs*
 *.njsproj

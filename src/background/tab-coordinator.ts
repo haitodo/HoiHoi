@@ -1,6 +1,5 @@
 import { CONTENT_SCANNER_SCRIPT_PATH } from '@shared/constants';
 import type { MessageResult } from '@shared/messages';
-import { networkSniffer } from './network-sniffer';
 import { refererRuleManager } from './referer-rules';
 import { sessionStore } from './session-store';
 
@@ -9,9 +8,11 @@ export async function bootstrapTabScan(
   openPanelPromise?: Promise<void>,
 ): Promise<void> {
   if (openPanelPromise) {
-    await openPanelPromise.catch((err: unknown) => {
+    const opened = await openPanelPromise.then(() => true).catch((err: unknown) => {
       console.error('[WIC] Failed to open Side Panel:', err);
+      return false;
     });
+    if (!opened) return;
   }
 
   const tabId = tab.id;
@@ -31,7 +32,6 @@ export async function bootstrapTabScan(
     return;
   }
 
-  networkSniffer.startSniffing();
   void refererRuleManager.setActiveTabContext(url);
 
   const existingSession = sessionStore.getSession(tabId);
@@ -44,6 +44,7 @@ export async function bootstrapTabScan(
     if (title) {
       sessionStore.updatePageTitle(tabId, title);
     }
+    existingSession.scanEpoch += 1;
     sessionStore.setScanStatus(tabId, 'scanning');
     sessionEpoch = existingSession.scanEpoch;
   }
@@ -86,8 +87,8 @@ export async function triggerTabRescan(tabId: number): Promise<boolean> {
     return false;
   }
 
-  networkSniffer.startSniffing();
   void refererRuleManager.setActiveTabContext(urlToCheck);
+  session.scanEpoch += 1;
   sessionStore.setScanStatus(tabId, 'scanning');
   return injectAndStartScanner(tabId, session.scanEpoch);
 }
@@ -109,6 +110,7 @@ async function injectAndStartScanner(
         type: 'BG_START_OR_RESCAN',
         scanEpoch,
       });
+      void chrome.runtime.sendMessage({ type: 'HOIHOI_SCANNER_READY', tabId }).catch(() => {});
       return true;
     }
   } catch {
@@ -127,6 +129,8 @@ async function injectAndStartScanner(
       type: 'BG_START_OR_RESCAN',
       scanEpoch,
     });
+    sessionStore.announceSnapshot(tabId);
+    void chrome.runtime.sendMessage({ type: 'HOIHOI_SCANNER_READY', tabId }).catch(() => {});
     return true;
   } catch (err) {
     console.warn('[WIC] Injection failed (activeTab may have expired):', err);
@@ -141,38 +145,17 @@ async function injectAndStartScanner(
 
 export function handleTabNavigation(tabId: number): void {
   const session = sessionStore.getSession(tabId);
-  if (!session || session.scanStatus === 'unscanned') return;
-
-  // Verify whether content script is still responsive
-  setTimeout(async () => {
-    try {
-      const ping = (await chrome.tabs.sendMessage(tabId, {
-        channel: 'WIC_BG_TO_CONTENT',
-        type: 'BG_PING_CONTENT',
-      })) as MessageResult;
-
-      if (!ping?.ok) {
-        sessionStore.setScanStatus(
-          tabId,
-          'stale',
-          'ページが移動しました。ブラウザ右上の拡張機能アイコンをクリックしてください',
-        );
-      }
-    } catch {
-      sessionStore.setScanStatus(
-        tabId,
-        'stale',
-        'ページが移動しました。ブラウザ右上の拡張機能アイコンをクリックしてください',
-      );
-    }
-  }, 500);
+  if (!session || session.scanStatus === 'unscanned' || session.scanStatus === 'stale') return;
+  sessionStore.setScanStatus(tabId, 'stale',
+    'ページが移動しました。ブラウザ右上の拡張機能アイコンをクリックしてください');
 }
 
-export async function stopTabScanner(tabId: number): Promise<void> {
+export async function stopTabScanner(tabId: number, releaseData = false): Promise<void> {
   try {
     await chrome.tabs.sendMessage(tabId, {
       channel: 'WIC_BG_TO_CONTENT',
       type: 'BG_STOP_SCANNER',
+      releaseData,
     });
   } catch {
     // Tab might be closed or script not present; ignore cleanly

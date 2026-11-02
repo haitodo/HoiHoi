@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { PORT_NAMES } from '@shared/constants';
+import { BLOB_STREAM_CHUNK_BYTES, PORT_NAMES, VIDEO_BLOB_MAX_BYTES } from '@shared/constants';
 import {
   isBgToPanelRpc,
   type BlobStreamPortMessage,
@@ -8,6 +8,7 @@ import {
   type PanelToBackgroundMessage,
 } from '@shared/messages';
 import { inferVideoFormat, parseContentRangeTotalBytes } from '@shared/video-utils';
+import { PANEL_INSTANCE_ID } from '../panel-instance';
 
 const HTTP_BLOB_SLICE_FLUSH_BYTES = 8 * 1024 * 1024; // 8 MB slices keep V8 heap flat
 const PROGRESS_REPORT_THROTTLE_MS = 250;
@@ -16,7 +17,8 @@ const SW_KEEPALIVE_INTERVAL_MS = 5_000;
 interface InFlightTransfer {
   mimeType: string;
   totalBytes: number;
-  chunks: Uint8Array[];
+  receivedBytes: number;
+  chunks: Blob[];
   completed: boolean;
   error?: string;
   waiters: Array<{
@@ -37,14 +39,22 @@ function base64ToUint8Array(base64: string): Uint8Array {
   return bytes;
 }
 
-const trackedPanelObjectUrls = new Set<string>();
+const trackedPanelObjectUrls = new Map<string, (() => Promise<void>) | undefined>();
 
 /**
  * Registers an ObjectURL created in Side Panel so Background can revoke it cleanly
  * via `PANEL_REVOKE_OBJECT_URL` as soon as `chrome.downloads` completes or cancels.
  */
-export function registerSidePanelObjectUrl(objectUrl: string): void {
-  trackedPanelObjectUrls.add(objectUrl);
+export function registerSidePanelObjectUrl(objectUrl: string, dispose?: () => Promise<void>): void {
+  trackedPanelObjectUrls.set(objectUrl, dispose);
+}
+
+export function releaseSidePanelObjectUrl(objectUrl: string): void {
+  if (!trackedPanelObjectUrls.has(objectUrl)) return;
+  const dispose = trackedPanelObjectUrls.get(objectUrl);
+  trackedPanelObjectUrls.delete(objectUrl);
+  URL.revokeObjectURL(objectUrl);
+  void dispose?.().catch(() => {});
 }
 
 /**
@@ -294,12 +304,19 @@ export function useBlobStreamBridge(): void {
       transfer.chunks = [];
       const objectUrl = URL.createObjectURL(reconstructed);
       transfer.objectUrl = objectUrl;
-      trackedPanelObjectUrls.add(objectUrl);
+      registerSidePanelObjectUrl(objectUrl);
       return objectUrl;
     };
 
     const handleConnect = (port: chrome.runtime.Port) => {
-      if (port.name !== PORT_NAMES.BLOB_STREAM) return;
+      if (port.name !== `${PORT_NAMES.BLOB_STREAM}:${PANEL_INSTANCE_ID}` && port.name !== PORT_NAMES.BLOB_STREAM) return;
+      const transferIds = new Set<string>();
+      const failTransfer = (transferId: string, error: string) => {
+        const transfer = transfers.get(transferId);
+        transfer?.waiters.forEach((waiter) => waiter.reject(new Error(error)));
+        transfers.delete(transferId);
+        port.postMessage({ type: 'BLOB_STREAM_ERROR', transferId, error } satisfies BlobStreamPortMessage);
+      };
 
       port.onMessage.addListener((rawMsg: unknown) => {
         const msg = rawMsg as BlobStreamPortMessage | undefined;
@@ -307,14 +324,21 @@ export function useBlobStreamBridge(): void {
 
         switch (msg.type) {
           case 'BLOB_STREAM_INIT': {
+            if (transfers.size >= 2 || msg.totalBytes <= 0 || msg.totalBytes > VIDEO_BLOB_MAX_BYTES) {
+              failTransfer(msg.transferId, '動画転送の容量または同時実行上限を超えています');
+              return;
+            }
             transfers.set(msg.transferId, {
               mimeType: msg.mimeType || 'video/mp4',
               totalBytes: msg.totalBytes,
+              receivedBytes: 0,
               chunks: [],
               completed: false,
               waiters: [],
               createdAt: Date.now(),
             });
+            transferIds.add(msg.transferId);
+            port.postMessage({ type: 'BLOB_STREAM_ACK', transferId: msg.transferId, index: -1 } satisfies BlobStreamPortMessage);
             break;
           }
 
@@ -322,9 +346,16 @@ export function useBlobStreamBridge(): void {
             const t = transfers.get(msg.transferId);
             if (!t || t.error) return;
             try {
-              t.chunks[msg.index] = base64ToUint8Array(msg.base64Chunk);
+              if (msg.index !== t.chunks.length || msg.base64Chunk.length > Math.ceil(BLOB_STREAM_CHUNK_BYTES / 3) * 4) {
+                throw new Error('転送チャンクの順序またはサイズが不正です');
+              }
+              const bytes = base64ToUint8Array(msg.base64Chunk);
+              if (t.receivedBytes + bytes.byteLength > t.totalBytes) throw new Error('転送サイズが上限を超えています');
+              t.receivedBytes += bytes.byteLength;
+              t.chunks.push(new Blob([bytes as Uint8Array<ArrayBuffer>]));
+              port.postMessage({ type: 'BLOB_STREAM_ACK', transferId: msg.transferId, index: msg.index } satisfies BlobStreamPortMessage);
             } catch (err) {
-              t.error = `チャンクのデコードに失敗しました: ${String(err)}`;
+              failTransfer(msg.transferId, `チャンクのデコードに失敗しました: ${String(err)}`);
             }
             break;
           }
@@ -332,7 +363,12 @@ export function useBlobStreamBridge(): void {
           case 'BLOB_STREAM_COMPLETE': {
             const t = transfers.get(msg.transferId);
             if (!t) return;
+            if (t.receivedBytes !== t.totalBytes) {
+              failTransfer(msg.transferId, '動画データの転送が完了していません');
+              return;
+            }
             t.completed = true;
+            port.postMessage({ type: 'BLOB_STREAM_ACK', transferId: msg.transferId, index: -2 } satisfies BlobStreamPortMessage);
             if (t.waiters.length > 0) {
               try {
                 const url = finalizeToObjectUrl(t);
@@ -361,6 +397,14 @@ export function useBlobStreamBridge(): void {
           }
         }
       });
+      port.onDisconnect.addListener(() => {
+        for (const id of transferIds) {
+          const transfer = transfers.get(id);
+          if (!transfer || transfer.completed) continue;
+          transfer.waiters.forEach((waiter) => waiter.reject(new Error('動画の転送が中断されました')));
+          transfers.delete(id);
+        }
+      });
     };
 
     const handleRpc = (
@@ -369,6 +413,7 @@ export function useBlobStreamBridge(): void {
       sendResponse: (response?: unknown) => void,
     ): boolean => {
       if (!isBgToPanelRpc(message)) return false;
+      if (message.recipientPanelId && message.recipientPanelId !== PANEL_INSTANCE_ID) return false;
 
       if (message.type === 'PANEL_CREATE_OBJECT_URL_FROM_TRANSFER') {
         const t = transfers.get(message.transferId);
@@ -428,12 +473,7 @@ export function useBlobStreamBridge(): void {
       }
 
       if (message.type === 'PANEL_REVOKE_OBJECT_URL') {
-        if (trackedPanelObjectUrls.has(message.objectUrl)) {
-          try {
-            URL.revokeObjectURL(message.objectUrl);
-          } catch {}
-          trackedPanelObjectUrls.delete(message.objectUrl);
-        }
+        releaseSidePanelObjectUrl(message.objectUrl);
         sendResponse({ ok: true });
         return false;
       }
@@ -457,12 +497,7 @@ export function useBlobStreamBridge(): void {
         } catch {}
       }
       activeHttpControllers.clear();
-      for (const url of trackedPanelObjectUrls) {
-        try {
-          URL.revokeObjectURL(url);
-        } catch {}
-      }
-      trackedPanelObjectUrls.clear();
+      for (const url of trackedPanelObjectUrls.keys()) releaseSidePanelObjectUrl(url);
       transfers.clear();
     };
   }, []);

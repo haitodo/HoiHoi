@@ -15,13 +15,22 @@ import {
   downloadAndAssembleHlsVod,
   type HlsStreamMergeProgress,
 } from '../utils/hls-saver';
+import { PANEL_INSTANCE_ID } from '../panel-instance';
+import { releaseSidePanelObjectUrl } from './useBlobStreamBridge';
 
 export function useTabSession(tabId: number | null) {
   const [snapshot, setSnapshot] = useState<TabSessionSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const revisionRef = useRef<number>(0);
+  const targetTabRef = useRef(tabId);
+  targetTabRef.current = tabId;
+  const requestSequence = useRef(0);
+  const pendingRequest = useRef<number | null>(null);
 
   const fetchSnapshot = useCallback(async (targetTabId: number) => {
+    if (pendingRequest.current === targetTabId) return;
+    const sequence = ++requestSequence.current;
+    pendingRequest.current = targetTabId;
     setLoading(true);
     try {
       const msg: PanelToBackgroundMessage = {
@@ -30,19 +39,27 @@ export function useTabSession(tabId: number | null) {
         tabId: targetTabId,
       };
       const res = (await chrome.runtime.sendMessage(msg)) as MessageResult<TabSessionSnapshot>;
-      if (res?.ok) {
-        setSnapshot(res.data);
-        revisionRef.current = res.data.revision;
+      if (res?.ok && targetTabRef.current === targetTabId && sequence === requestSequence.current) {
+        setSnapshot((previous) => previous?.tabId === targetTabId && previous.revision > res.data.revision
+          ? previous : res.data);
+        revisionRef.current = Math.max(revisionRef.current, res.data.revision);
       }
     } catch (err) {
       console.warn('[WIC] Failed to fetch tab session snapshot:', err);
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) {
+        pendingRequest.current = null;
+        setLoading(false);
+      }
     }
   }, []);
 
   // Fetch initial snapshot whenever active tabId changes
   useEffect(() => {
+    revisionRef.current = 0;
+    requestSequence.current += 1;
+    pendingRequest.current = null;
+    setSnapshot(null);
     if (tabId === null) {
       setSnapshot(null);
       return;
@@ -60,6 +77,7 @@ export function useTabSession(tabId: number | null) {
       if (tabId !== null && tabId > 0 && msg.tabId !== tabId) return;
 
       if (msg.type === 'EVENT_SESSION_REPLACED') {
+        if (msg.snapshot.revision < revisionRef.current) return;
         setSnapshot(msg.snapshot);
         revisionRef.current = msg.snapshot.revision;
         return;
@@ -88,6 +106,7 @@ export function useTabSession(tabId: number | null) {
       }
 
       // Self-heal if any delta event was missed
+      if (msg.revision <= revisionRef.current) return;
       if (revisionRef.current > 0 && msg.revision !== revisionRef.current + 1) {
         void fetchSnapshot(msg.tabId);
         return;
@@ -96,7 +115,7 @@ export function useTabSession(tabId: number | null) {
       revisionRef.current = msg.revision;
 
       setSnapshot((prev) => {
-        if (!prev) {
+        if (!prev || prev.tabId !== tabId) {
           void fetchSnapshot(msg.tabId);
           return null;
         }
@@ -217,7 +236,7 @@ export function useTabSession(tabId: number | null) {
   ): Promise<MessageResult<T> | undefined> => {
     try {
       if (typeof chrome === 'undefined' || !chrome.runtime?.id) return undefined;
-      return (await chrome.runtime.sendMessage(msg)) as MessageResult<T>;
+      return (await chrome.runtime.sendMessage({ ...msg, panelId: PANEL_INSTANCE_ID })) as MessageResult<T>;
     } catch (err) {
       console.warn('[WIC Panel] sendMessage failed:', err);
       return undefined;
@@ -368,6 +387,7 @@ export function useTabSession(tabId: number | null) {
       };
       const res = await sendPanelMessage(msg);
       if (!res?.ok) {
+        releaseSidePanelObjectUrl(assembled.objectUrl);
         throw new Error(res && !res.ok ? res.error : '結合データの保存開始に失敗しました');
       }
     },
@@ -455,7 +475,7 @@ export function useTabSession(tabId: number | null) {
   );
 
   return {
-    snapshot,
+    snapshot: snapshot?.tabId === tabId ? snapshot : null,
     loading,
     triggerRescan,
     toggleSelection,
