@@ -18,6 +18,26 @@ const NUMBER_PARAMETERS = new Set(['page', 'paged', 'pageno', 'pagenum', 'page_n
 const CURSOR_PARAMETERS = new Set(['cursor', 'after', 'before']);
 const PAGE_PATH = /^(.*\/)(page|paged)\/([1-9]\d*)\/?$/i;
 
+/** Page numbers, unlike offsets or post IDs, can corroborate a title's pagination decoration. */
+export function extractPageNumber(pageUrl?: string): number | null {
+  if (!isCollectionPageUrl(pageUrl)) return null;
+  const url = new URL(pageUrl!);
+  const numbers = new Set<number>();
+  for (const parameter of new Set(url.searchParams.keys())) {
+    const key = parameter.toLowerCase();
+    if (!NUMBER_PARAMETERS.has(key) || key === 'offset' || key === 'start') continue;
+    const values = url.searchParams.getAll(parameter);
+    if (values.length !== 1 || !validNumber(values[0]!, 1)) return null;
+    numbers.add(Number(values[0]));
+  }
+  const pathPage = PAGE_PATH.exec(url.pathname)?.[3];
+  if (pathPage) {
+    if (!validNumber(pathPage, 1)) return null;
+    numbers.add(Number(pathPage));
+  }
+  return numbers.size === 1 ? numbers.values().next().value! : null;
+}
+
 export function isCollectionPageUrl(value?: string): boolean {
   try {
     const url = new URL(value ?? '');

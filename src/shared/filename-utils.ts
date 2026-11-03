@@ -2,6 +2,7 @@ import { MAX_FILENAME_STEM_LENGTH, MAX_FOLDER_NAME_LENGTH } from './constants';
 import type { ImageFormat, VideoFormat } from './types';
 import { inferImageFormat } from './url-utils';
 import { inferVideoFormat } from './video-utils';
+import { normalizePageTitleForFolder } from './page-title-utils';
 
 const WINDOWS_RESERVED_NAMES = /^(con|prn|aux|nul|com[0-9]|lpt[0-9]|conin\$|conout\$)(\..*)?$/i;
 
@@ -94,16 +95,18 @@ export function buildSafeFolderName(title?: string, domain?: string): string {
  * 4. Truncates excessively long stems to `MAX_FILENAME_STEM_LENGTH` (100 chars).
  * 5. Appends extension based on inferred format if missing or mismatched.
  * 6. If `folderName` or `pageTitle` is provided, prepends a safe subdirectory.
+ *    Automatic titles omit page decorations corroborated by `pageUrl`; explicit folder names are preserved.
  */
 export function buildSafeDownloadFilename(options: {
   targetUrl: string;
   domain?: string;
   pageTitle?: string;
+  pageUrl?: string;
   folderName?: string;
   itemIndex?: number;
   format?: ImageFormat;
 }): string {
-  const { targetUrl, domain, pageTitle, folderName, itemIndex = 1, format } = options;
+  const { targetUrl, domain, pageTitle, pageUrl, folderName, itemIndex = 1, format } = options;
   const inferredFormat = format ?? inferImageFormat(targetUrl);
   const extFromFormat = FORMAT_TO_EXTENSION[inferredFormat];
 
@@ -174,7 +177,8 @@ export function buildSafeDownloadFilename(options: {
   const safeFilename = `${cleanStem}${finalExt}`;
 
   // If folderName or pageTitle is provided, prepend safe subdirectory
-  const folderCandidate = folderName !== undefined ? folderName : pageTitle;
+  const folderCandidate = folderName !== undefined ? folderName
+    : pageTitle === undefined ? undefined : normalizePageTitleForFolder(pageTitle, pageUrl);
   if (folderCandidate !== undefined) {
     const safeFolder = buildSafeFolderName(folderCandidate, domain);
     return `${safeFolder}/${safeFilename}`;
@@ -322,6 +326,7 @@ export function buildSafeVideoDownloadFilename(options: {
   contentDisposition?: string;
   domain?: string;
   pageTitle?: string;
+  pageUrl?: string;
   folderName?: string;
   itemIndex?: number;
   format?: VideoFormat;
@@ -334,6 +339,7 @@ export function buildSafeVideoDownloadFilename(options: {
     contentDisposition,
     domain,
     pageTitle,
+    pageUrl,
     folderName,
     itemIndex = 1,
     format,
@@ -409,7 +415,8 @@ export function buildSafeVideoDownloadFilename(options: {
   }
 
   const safeFilename = `${cleanStem}${finalExt}`;
-  const folderCandidate = folderName !== undefined ? folderName : pageTitle;
+  const folderCandidate = folderName !== undefined ? folderName
+    : pageTitle === undefined ? undefined : normalizePageTitleForFolder(pageTitle, pageUrl);
   if (folderCandidate !== undefined) {
     const safeFolder = buildSafeFolderName(folderCandidate, domain);
     return `${safeFolder}/${safeFilename}`;

@@ -365,6 +365,7 @@ export class DownloadManager {
       targetUrl: `https://frame.local/${encodeURIComponent(`${stem}_frame_${timeTag}.png`)}`,
       domain: session?.domain,
       pageTitle: session?.pageTitle ?? session?.domain ?? 'frames',
+      pageUrl: session?.pageUrl,
       format: 'png',
     });
 
@@ -399,6 +400,7 @@ export class DownloadManager {
       targetUrl: sourceManifestUrl,
       domain: session?.domain,
       pageTitle: session?.pageTitle ?? session?.domain ?? 'videos',
+      pageUrl: session?.pageUrl,
       itemIndex,
       format: containerExtension === '.mp4' ? 'mp4' : 'unknown',
       overrideExtension: containerExtension,
@@ -550,6 +552,7 @@ export class DownloadManager {
       targetUrl,
       domain: session.domain,
       pageTitle: session.pageTitle ?? session.domain ?? 'images',
+      pageUrl: session.pageUrl,
       format: variant?.format,
     });
 
@@ -729,6 +732,7 @@ export class DownloadManager {
       contentDisposition: resolvedContentDisposition,
       domain: session.domain,
       pageTitle: session.pageTitle ?? session.domain ?? 'videos',
+      pageUrl: session.pageUrl,
       itemIndex,
       format: effectiveFormat,
       mimeHint: resolvedMimeType,

@@ -289,12 +289,14 @@ stateDiagram-v2
   ```ts
   const downloadId = await chrome.downloads.download({
     url: downloadableUrl,
-    filename: sanitizedRelativeFilename, // サブフォルダなしの安全なファイル名
+    filename: sanitizedRelativeFilename, // 安全なタイトル由来サブフォルダ + ファイル名
     conflictAction: 'uniquify',          // AT-17: 既存ファイルを上書きせず連番付与
     saveAs: false,
   });
   ```
   ※ `chrome.downloads.onDeterminingFilename` リスナーは登録しない（他拡張機能と競合して Chrome 全体のファイル名決定を壊す既知問題があるため、`download()` 引数の `filename` + `conflictAction: 'uniquify'` を使う）。
+
+保存フォルダは `pageTitle` をそのままサニタイズする前に、`page-title-utils.ts` で独立したページ表記を除去する。`pageUrl` の既知のページ番号クエリまたは `/page/N/` と一致する番号だけを対象とし、オフセット・記事ID・番号が競合するURLは推測しない。表示・セッションの `pageTitle` は元の文字列を保持する。明示された `folderName` にはこの正規化を適用せず、従来のファイルシステム向けサニタイズのみを行う。画像・動画・キャプチャ画像・結合動画で同じ処理を使う。
 
 ### 7.4 `blob:` URL と巨大退避 `data:` URL のオンデマンド解決フロー
 

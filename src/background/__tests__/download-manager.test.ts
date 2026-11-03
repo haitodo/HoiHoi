@@ -171,6 +171,23 @@ describe('DownloadManager (Dual-Lane & Readiness Gate)', () => {
     } finally { acquire.mockRestore(); release.mockRestore(); }
   });
 
+  it('normalizes only the download folder after manual page navigation and retains the displayed page title', async () => {
+    const tabId = 615;
+    image(tabId);
+    sessionStore.resetSessionForNewPage(tabId, 'https://www.v2ph.com/album/example.html?page=2&hl=ja',
+      'watching', '写真集 - 2ページ - 微图坊');
+    sessionStore.mergeCandidateGroups(tabId, sessionStore.getSession(tabId)!.scanEpoch, [{
+      occurrenceKey: 'page2photo', primaryUrl: 'https://cdn.example.com/photo.jpg', domOrder: 1,
+      variants: [{ url: 'https://cdn.example.com/photo.jpg', role: 'src', source: 'img', naturalWidth: null, naturalHeight: null }],
+    }]);
+    const pageItemId = sessionStore.getSnapshot(tabId).items[0]!.itemId;
+    manager.enqueue(tabId, [pageItemId], 'image-panel');
+    await vi.waitFor(() => expect(startedDownloads).toHaveLength(1));
+    expect(startedDownloads[0]?.filename).toBe('写真集 - 微图坊/photo.jpg');
+    expect(sessionStore.getSnapshot(tabId).pageTitle).toBe('写真集 - 2ページ - 微图坊');
+    manager.handleDownloadDelta({ id: startedDownloads[0]!.id, state: { current: 'complete' } });
+  });
+
   it('blocks non-ready video streams at Readiness Gate while allowing ready MP4 and images concurrently', async () => {
     const tabId = 501;
     sessionStore.resetSessionForNewPage(

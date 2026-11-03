@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSafeDownloadFilename,
   buildSafeFolderName,
+  buildSafeVideoDownloadFilename,
   extractFilenameForSort,
 } from '../filename-utils';
 
@@ -119,6 +120,22 @@ describe('filename-utils', () => {
         domain: 'example.com',
       });
       expect(name).toBe('Beautiful Nature & Landscapes/landscape.jpg');
+    });
+
+    it('saves manual page navigation to the same album folder while preserving an explicit folder name', () => {
+      const common = { targetUrl: 'https://cdn.example.com/photo.jpg', domain: 'example.com' };
+      const first = buildSafeDownloadFilename({ ...common, pageTitle: '写真集 - 微图坊',
+        pageUrl: 'https://www.v2ph.com/album/example.html?hl=ja' });
+      const second = buildSafeDownloadFilename({ ...common, pageTitle: '写真集 - 2ページ - 微图坊',
+        pageUrl: 'https://www.v2ph.com/album/example.html?page=2&hl=ja' });
+      expect(first).toBe('写真集 - 微图坊/photo.jpg');
+      expect(second).toBe(first);
+      expect(buildSafeDownloadFilename({ ...common, folderName: '指定した名前 - 2ページ',
+        pageTitle: '写真集 - 2ページ - 微图坊', pageUrl: 'https://www.v2ph.com/album/example.html?page=2' }))
+        .toBe('指定した名前 - 2ページ/photo.jpg');
+      expect(buildSafeVideoDownloadFilename({ targetUrl: 'https://cdn.example.com/video.mp4',
+        pageTitle: 'Album | Page 2 | Site', pageUrl: 'https://example.com/gallery/page/2/' }))
+        .toBe('Album_Site/video.mp4');
     });
 
     it('falls back to domain folder when pageTitle is empty', () => {
