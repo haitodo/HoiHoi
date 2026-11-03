@@ -131,6 +131,38 @@ export interface ScannerWatchMessage {
   scanEpoch: number;
 }
 
+export type ScanToolKind = 'dimensions' | 'scroll' | 'pages';
+
+export interface ScanToolProgress {
+  tool: ScanToolKind;
+  status: 'running' | 'completed' | 'stopped' | 'failed';
+  current: number;
+  total?: number;
+  failed?: number;
+  message: string;
+}
+
+export interface StartScanToolMessage {
+  type: 'START_SCAN_TOOL';
+  tabId: number;
+  scanEpoch: number;
+  tool: ScanToolKind;
+}
+
+export interface RunScanToolMessage {
+  type: 'RUN_SCAN_TOOL';
+  tool: ScanToolKind;
+  scanEpoch: number;
+  pageUrl: string;
+  urls: string[];
+  orderStart: number;
+}
+
+export interface ScanToolProgressMessage {
+  type: 'SCAN_TOOL_PROGRESS';
+  progress: ScanToolProgress;
+}
+
 export interface BlobDataUrlResponse {
   dataUrl: string;
   mimeType: string;

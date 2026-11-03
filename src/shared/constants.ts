@@ -53,6 +53,13 @@ export const INLINE_DATA_URL_SESSION_MAX_CHARS = 32_768;
 /** Maximum byte size allowed when reading a page-origin image `blob:` URL inline as Data URL. */
 export const BLOB_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
 
+/** Explicitly started scan tools never persist or run on ordinary scans. */
+export const SCAN_TOOL_MAX_DURATION_MS = 120_000;
+export const IMAGE_PROBE_CONCURRENCY = 3;
+export const IMAGE_PROBE_TIMEOUT_MS = 8_000;
+export const PAGE_COLLECTION_MAX_PAGES = 50;
+export const PAGE_COLLECTION_HTML_MAX_CHARS = 2_000_000;
+
 /** Threshold up to which a video `blob:` URL is returned inline as Data URL; larger blobs stream via Port Chunk Bridge. */
 export const INLINE_VIDEO_BLOB_MAX_BYTES = 16 * 1024 * 1024;
 
@@ -200,6 +207,7 @@ export const RESTRICTED_VIDEO_DOMAINS = new Set([
 
 /** Port channel names used for long-lived connections and large blob streaming. */
 export const PORT_NAMES = {
+  SCAN_TOOLS: 'hoihoi-scan-tools',
   SIDEPANEL_LIFECYCLE: 'hoihoi-sidepanel',
   SCANNER_LIFECYCLE: 'hoihoi-scanner-watch',
   BLOB_STREAM: 'hoihoi-blob-stream',

@@ -8,6 +8,7 @@ import { createChunkRunner, type ChunkRunnerController } from './chunk-runner';
 import { PORT_NAMES } from '@shared/constants';
 import type { ScannerWatchMessage } from '@shared/messages';
 import { LargeDataStore } from './large-data-store';
+import { createScanToolsController } from './scan-tools';
 
 /**
  * Robust Content Script (`dist/content/scanner.js`)
@@ -37,6 +38,7 @@ function isExtensionContextValid(): boolean {
 function createScannerController(): WicScannerController {
   let currentScanEpoch = 1;
   const largeDataUrlStore = new LargeDataStore();
+  const scanTools = createScanToolsController({ getEpoch: () => currentScanEpoch, largeDataUrlStore });
   const viewers = new Set<chrome.runtime.Port>();
   let runningEpoch: number | null = null;
   let replayRequired = false;
@@ -76,6 +78,7 @@ function createScannerController(): WicScannerController {
       }
 
       case 'BG_START_OR_RESCAN': {
+        scanTools.stop();
         currentScanEpoch = message.scanEpoch || currentScanEpoch + 1;
         replayRequired = true;
         runningEpoch = null;
@@ -149,6 +152,7 @@ function createScannerController(): WicScannerController {
 
       case 'BG_STOP_SCANNER': {
         if (viewers.size === 0) {
+          scanTools.stop();
           chunkRunner.destroy(Boolean(message.releaseData));
           runningEpoch = null;
           if (message.releaseData) largeDataUrlStore.clear();
@@ -161,6 +165,7 @@ function createScannerController(): WicScannerController {
   chrome.runtime.onMessage.addListener(onMessage);
 
   const onConnect = (port: chrome.runtime.Port) => {
+    if (port.name === PORT_NAMES.SCAN_TOOLS) { scanTools.attach(port); return; }
     if (port.name !== PORT_NAMES.SCANNER_LIFECYCLE) return;
     port.onMessage.addListener((message: ScannerWatchMessage) => {
       if (message?.type !== 'SCANNER_WATCH' || !Number.isInteger(message.scanEpoch)) return;
@@ -171,6 +176,7 @@ function createScannerController(): WicScannerController {
     port.onDisconnect.addListener(() => {
       viewers.delete(port);
       if (viewers.size === 0) {
+        scanTools.stop();
         chunkRunner.destroy();
         runningEpoch = null;
       }
@@ -187,6 +193,7 @@ function createScannerController(): WicScannerController {
       return currentScanEpoch;
     },
     destroy() {
+      scanTools.stop();
       chunkRunner.destroy(true);
       chrome.runtime.onMessage.removeListener(onMessage);
       chrome.runtime.onConnect.removeListener(onConnect);

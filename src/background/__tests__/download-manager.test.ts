@@ -150,6 +150,27 @@ describe('DownloadManager (Dual-Lane & Readiness Gate)', () => {
     expect(startedDownloads).toHaveLength(0);
   });
 
+  it('uses a collected image’s source album page as its download Referer', async () => {
+    const tabId = 614;
+    const { itemId, url, pageUrl } = image(tabId);
+    const sourcePageUrl = `${pageUrl}&page=2`;
+    sessionStore.mergeCandidateGroups(tabId, sessionStore.getSession(tabId)!.scanEpoch, [{
+      occurrenceKey: 'page2', primaryUrl: url, domOrder: 2,
+      variants: [{ url, role: 'src', source: 'img', naturalWidth: null, naturalHeight: null, sourcePageUrl }],
+    }]);
+    const acquire = vi.spyOn(refererRuleManager, 'acquireDownloadRule').mockResolvedValue();
+    const release = vi.spyOn(refererRuleManager, 'releaseDownloadRule').mockResolvedValue();
+    try {
+      (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true, data: { mode: 'object_url', objectUrl: 'blob:album-photo', finalUrl: url, totalBytes: 10 },
+      });
+      manager.enqueue(tabId, [itemId], 'image-panel');
+      await vi.waitFor(() => expect(startedDownloads).toHaveLength(1));
+      expect(acquire).toHaveBeenCalledWith(`${tabId}:${itemId}`, sourcePageUrl, url);
+      manager.handleDownloadDelta({ id: startedDownloads[0]!.id, state: { current: 'complete' } });
+    } finally { acquire.mockRestore(); release.mockRestore(); }
+  });
+
   it('blocks non-ready video streams at Readiness Gate while allowing ready MP4 and images concurrently', async () => {
     const tabId = 501;
     sessionStore.resetSessionForNewPage(

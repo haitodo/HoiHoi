@@ -20,6 +20,7 @@ import { DownloadFooter } from './components/DownloadFooter';
 import { EmptyOrStatusView } from './components/EmptyOrStatusView';
 import { FilterBar } from './components/FilterBar';
 import { Header } from './components/Header';
+import { ScanTools } from './components/ScanTools';
 import { ImageGrid } from './components/ImageGrid';
 import { ImageLightboxModal } from './components/ImageLightboxModal';
 import { MediaModeTabs } from './components/MediaModeTabs';
@@ -705,6 +706,7 @@ export function App() {
         <>
           {!isGlobalBlockedStatus && (
             <>
+              <ScanTools snapshot={snapshot} enabled={isPanelVisible} />
               <FilterBar
                 filter={filter}
                 onChange={handleFilterChange}

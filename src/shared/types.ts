@@ -40,6 +40,8 @@ export type VariantRole =
  * (e.g. a `<picture>` + `<img>` + enclosing `<a href>`).
  */
 export interface RawVariantCandidate {
+  /** Source document for images collected from another album page. */
+  sourcePageUrl?: string;
   /** Absolute URL normalized via `new URL(raw, baseURI).href` (or `large-data:<refId>` placeholder). */
   url: string;
   role: VariantRole;
@@ -76,6 +78,7 @@ export interface RawCandidateGroup {
  * Stores its own dimensions & format so switching variants preserves accurate metadata.
  */
 export interface ImageVariant {
+  sourcePageUrl?: string;
   url: string;
   roles: VariantRole[];
   /** Collected descriptors (e.g. `["800w", "2x"]`). Never labeled "Original" or "Highest Quality" (`spec.md` §6.3). */

@@ -539,7 +539,7 @@ export class DownloadManager {
     if (targetUrl.startsWith('http:') || targetUrl.startsWith('https:')) {
       // Fetch with cookies and the page's Referer before saving the original image bytes.
       preparedHttp = await this.prepareHttpDownload({
-        tabId, itemId, targetUrl, pageUrl: session.pageUrl, panelId,
+        tabId, itemId, targetUrl, pageUrl: variant?.sourcePageUrl ?? session.pageUrl, panelId,
         mediaMode: 'image', maxBytes: BLOB_DOWNLOAD_MAX_BYTES,
       });
       if (!preparedHttp) return;

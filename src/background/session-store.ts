@@ -503,6 +503,7 @@ export class SessionStore {
             naturalWidth: rawVar.naturalWidth,
             naturalHeight: rawVar.naturalHeight,
             largeDataRefId: rawVar.largeDataRefId,
+            sourcePageUrl: rawVar.sourcePageUrl,
           };
           item.variants.push(existingVar);
           changed = true;
@@ -525,6 +526,10 @@ export class SessionStore {
           }
           if (rawVar.largeDataRefId && existingVar.largeDataRefId !== rawVar.largeDataRefId) {
             existingVar.largeDataRefId = rawVar.largeDataRefId;
+            changed = true;
+          }
+          if (rawVar.sourcePageUrl && !existingVar.sourcePageUrl) {
+            existingVar.sourcePageUrl = rawVar.sourcePageUrl;
             changed = true;
           }
         }

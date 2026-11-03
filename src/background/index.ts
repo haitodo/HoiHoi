@@ -11,6 +11,7 @@ import { networkSniffer } from './network-sniffer';
 import { PanelSubscriptions } from './panel-subscriptions';
 import { refererRuleManager } from './referer-rules';
 import { sessionStore } from './session-store';
+import { attachScanToolBridge } from './scan-tools';
 import {
   bootstrapTabScan,
   handleTabNavigation,
@@ -86,6 +87,10 @@ function refreshNetworkTargets(): void {
 }
 
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === PORT_NAMES.SCAN_TOOLS) {
+    attachScanToolBridge(port, (tabId) => panels.watches(tabId));
+    return;
+  }
   if (port.name === PORT_NAMES.SIDEPANEL_LIFECYCLE) {
     panels.add(port);
   }
