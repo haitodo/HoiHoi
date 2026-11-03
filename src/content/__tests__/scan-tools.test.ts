@@ -93,14 +93,41 @@ describe('optional scrolling', () => {
   function viewport() {
     vi.useFakeTimers();
     const listeners = new Map<string, (...args: any[]) => void>();
+    const page = { scrollingElement: { scrollHeight: 2000 } };
     const win = { scrollX: 10, scrollY: 150, innerHeight: 500,
-      scrollTo: vi.fn((position: { top: number }) => { win.scrollY = Math.min(1500, position.top); }),
+      scrollTo: vi.fn((position: { top: number }) => { win.scrollY = Math.min(page.scrollingElement.scrollHeight - win.innerHeight, position.top); }),
       addEventListener: vi.fn((name, callback) => listeners.set(name, callback)),
       removeEventListener: vi.fn((name) => listeners.delete(name)) };
     vi.stubGlobal('window', win);
-    vi.stubGlobal('document', { scrollingElement: { scrollHeight: 2000 } });
-    return { win, listeners };
+    vi.stubGlobal('document', page);
+    return { win, listeners, page };
   }
+  it('reaches the bottom of a forty-viewport page within 2.5 seconds instead of pausing at every image', async () => {
+    const { win, page } = viewport();
+    page.scrollingElement.scrollHeight = 20_500;
+    const completed = vi.fn();
+    const result = scrollPage(new AbortController().signal, vi.fn()).then(completed);
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(win.scrollY).toBe(20_000);
+    expect(completed).not.toHaveBeenCalled(); // Bottom settling still waits for asynchronously appended content.
+    await vi.runAllTimersAsync(); await result;
+    expect(completed).toHaveBeenCalledOnce();
+    expect(win.scrollY).toBe(150);
+  });
+  it('resumes the fast sweep when delayed content extends the bottom of the page', async () => {
+    const { win, page } = viewport();
+    const completed = vi.fn();
+    const result = scrollPage(new AbortController().signal, vi.fn()).then(completed);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(win.scrollY).toBe(1500);
+    page.scrollingElement.scrollHeight = 5000;
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(win.scrollY).toBe(4500);
+    expect(completed).not.toHaveBeenCalled();
+    await vi.runAllTimersAsync(); await result;
+    expect(win.scrollY).toBe(150);
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('waits for a stable bottom and restores the starting position on completion', async () => {
     const { win, listeners } = viewport();
     const progress = vi.fn();

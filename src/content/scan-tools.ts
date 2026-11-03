@@ -1,4 +1,6 @@
 import {
+  AUTO_SCROLL_BOTTOM_STABLE_CHECKS, AUTO_SCROLL_BOTTOM_WAIT_MS, AUTO_SCROLL_MAX_STEPS,
+  AUTO_SCROLL_STEP_INTERVAL_MS, AUTO_SCROLL_VIEWPORT_FRACTION,
   PAGE_COLLECTION_HTML_MAX_CHARS, IMAGE_PROBE_CONCURRENCY, IMAGE_PROBE_TIMEOUT_MS,
   MAX_ITEMS_PER_TAB, SCAN_BATCH_MAX_SIZE, SCAN_TOOL_MAX_DURATION_MS,
 } from '@shared/constants';
@@ -79,15 +81,18 @@ export async function scrollPage(signal: AbortSignal, onProgress: (steps: number
   let stable = 0; let lastHeight = -1;
   try {
     window.scrollTo({ top: 0, left: original.left, behavior: 'instant' });
-    for (let steps = 1; steps <= 200; steps++) {
-      await pause(800, local.signal);
+    for (let steps = 1; steps <= AUTO_SCROLL_MAX_STEPS; steps++) {
+      const beforeHeight = document.scrollingElement?.scrollHeight ?? document.documentElement.scrollHeight;
+      const wasAtBottom = window.scrollY + window.innerHeight >= beforeHeight - 2;
+      // A short pause lets scroll/IntersectionObserver callbacks run without waiting for each image to download.
+      await pause(wasAtBottom ? AUTO_SCROLL_BOTTOM_WAIT_MS : AUTO_SCROLL_STEP_INTERVAL_MS, local.signal);
       const height = document.scrollingElement?.scrollHeight ?? document.documentElement.scrollHeight;
       const bottom = window.scrollY + window.innerHeight >= height - 2;
       stable = bottom && height === lastHeight ? stable + 1 : 0;
       lastHeight = height;
       onProgress(steps);
-      if (stable >= 3) return;
-      window.scrollTo({ left: original.left, top: Math.min(height, window.scrollY + window.innerHeight * 0.8), behavior: 'instant' });
+      if (stable >= AUTO_SCROLL_BOTTOM_STABLE_CHECKS) return;
+      window.scrollTo({ left: original.left, top: Math.min(height, window.scrollY + window.innerHeight * AUTO_SCROLL_VIEWPORT_FRACTION), behavior: 'instant' });
     }
     throw new Error('スクロール回数の上限に到達しました');
   } finally {

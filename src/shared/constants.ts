@@ -55,6 +55,12 @@ export const BLOB_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
 
 /** Explicitly started scan tools never persist or run on ordinary scans. */
 export const SCAN_TOOL_MAX_DURATION_MS = 120_000;
+/** Sweep quickly through every viewport; allow asynchronous additions to settle only at the bottom. */
+export const AUTO_SCROLL_STEP_INTERVAL_MS = 50;
+export const AUTO_SCROLL_VIEWPORT_FRACTION = 0.95;
+export const AUTO_SCROLL_BOTTOM_WAIT_MS = 800;
+export const AUTO_SCROLL_BOTTOM_STABLE_CHECKS = 3;
+export const AUTO_SCROLL_MAX_STEPS = 200;
 export const IMAGE_PROBE_CONCURRENCY = 3;
 export const IMAGE_PROBE_TIMEOUT_MS = 8_000;
 export const PAGE_COLLECTION_MAX_PAGES = 50;
