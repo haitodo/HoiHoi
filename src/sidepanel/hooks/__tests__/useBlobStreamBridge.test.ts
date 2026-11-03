@@ -37,12 +37,65 @@ describe('panel transfer isolation', () => {
 
   it('ignores other panels rather than duplicating fetches or decoding their streams', () => {
     const response = vi.fn();
-    expect(messages.emit({ channel: 'WIC_BG_TO_PANEL_RPC', type: 'PANEL_FETCH_HTTP_VIDEO_TO_OBJECT_URL',
+    expect(messages.emit({ channel: 'WIC_BG_TO_PANEL_RPC', type: 'PANEL_FETCH_HTTP_MEDIA_TO_OBJECT_URL', mediaMode: 'video',
       recipientPanelId: 'another-panel', tabId: 1, itemId: 'vid_1', transferId: 'one', url: 'https://example.com/a.mp4', maxBytes: 100 },
     {}, response)).toEqual([false]);
     expect(fetch).not.toHaveBeenCalled();
     expect(response).not.toHaveBeenCalled();
     expect(connect(`${PORT_NAMES.BLOB_STREAM}:another-panel`).onMessage.size()).toBe(0);
+  });
+
+  function fetchImage(maxBytes = 100) {
+    const response = vi.fn();
+    messages.emit({ channel: 'WIC_BG_TO_PANEL_RPC', type: 'PANEL_FETCH_HTTP_MEDIA_TO_OBJECT_URL',
+      mediaMode: 'image', recipientPanelId: PANEL_INSTANCE_ID, tabId: 1, itemId: 'item_1',
+      transferId: 'photo', url: 'https://cdn.v2ph.com/photos/example.jpg?signature=keep', maxBytes }, {}, response);
+    return response;
+  }
+
+  it('fetches images with cookies and preserves their original bytes and MIME type', async () => {
+    const bytes = new Uint8Array([255, 216, 255, 217]);
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(bytes, { headers: { 'content-type': 'image/jpeg' } }));
+    const response = fetchImage();
+    await vi.waitFor(() => expect(response).toHaveBeenCalled());
+    expect(fetch).toHaveBeenCalledWith('https://cdn.v2ph.com/photos/example.jpg?signature=keep',
+      expect.objectContaining({ credentials: 'include', signal: expect.any(AbortSignal) }));
+    const blob = vi.mocked(URL.createObjectURL).mock.calls[0]![0] as Blob;
+    expect(blob.type).toBe('image/jpeg');
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(bytes);
+    expect(response).toHaveBeenCalledWith({ ok: true, data: expect.objectContaining({
+      mode: 'object_url', mimeType: 'image/jpeg', totalBytes: bytes.length,
+    }) });
+    messages.emit({ channel: 'WIC_BG_TO_PANEL_RPC', type: 'PANEL_REVOKE_OBJECT_URL',
+      objectUrl: 'blob:isolated' }, {}, vi.fn());
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:isolated');
+  });
+
+  it.each([
+    [403, 'text/plain', 'HTTP_403'],
+    [200, 'text/html; charset=utf-8', 'HTML_RESPONSE'],
+  ])('rejects image error responses (%s, %s) without creating a file', async (status, mime, code) => {
+    const cancel = vi.fn();
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(new ReadableStream({ cancel }),
+      { status, headers: { 'content-type': mime } }));
+    const response = fetchImage();
+    await vi.waitFor(() => expect(response).toHaveBeenCalled());
+    expect(response).toHaveBeenCalledWith(expect.objectContaining({ ok: false, code }));
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('stops buffering images at the byte limit even without Content-Length', async () => {
+    const cancel = vi.fn();
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new Uint8Array([1, 2, 3])); }, cancel,
+    }), { headers: { 'content-type': 'image/jpeg' } }));
+    const response = fetchImage(2);
+    await vi.waitFor(() => expect(response).toHaveBeenCalled());
+    expect(response).toHaveBeenCalledWith(expect.objectContaining({ ok: true,
+      data: expect.objectContaining({ mode: 'direct_url_fallback' }) }));
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
 
   it('acknowledges bounded chunks and exposes only the completed stream to its owner', () => {
@@ -73,7 +126,7 @@ describe('panel transfer isolation', () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response(new ReadableStream({ cancel }),
       { headers: { 'content-type': 'video/mp4', 'content-length': '1000' } }));
     const response = vi.fn();
-    messages.emit({ channel: 'WIC_BG_TO_PANEL_RPC', type: 'PANEL_FETCH_HTTP_VIDEO_TO_OBJECT_URL',
+    messages.emit({ channel: 'WIC_BG_TO_PANEL_RPC', type: 'PANEL_FETCH_HTTP_MEDIA_TO_OBJECT_URL', mediaMode: 'video',
       recipientPanelId: PANEL_INSTANCE_ID, tabId: 1, itemId: 'vid_1', transferId: 'one', url: 'https://example.com/a.mp4', maxBytes: 100 },
     {}, response);
     await vi.waitFor(() => expect(response).toHaveBeenCalled());

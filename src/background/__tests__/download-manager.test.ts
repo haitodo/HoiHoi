@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DownloadManager } from '../download-manager';
 import { sessionStore } from '../session-store';
 import { refererRuleManager } from '../referer-rules';
+import { BLOB_DOWNLOAD_MAX_BYTES } from '@shared/constants';
 
 describe('DownloadManager (Dual-Lane & Readiness Gate)', () => {
   let manager: DownloadManager;
@@ -44,6 +45,109 @@ describe('DownloadManager (Dual-Lane & Readiness Gate)', () => {
     };
 
     manager = new DownloadManager();
+  });
+
+  function image(tabId: number) {
+    const pageUrl = 'https://www.v2ph.com/album/a54xex5z.html?hl=ja';
+    const url = 'https://cdn.v2ph.com/photos/example.jpg?signature=keep';
+    sessionStore.resetSessionForNewPage(tabId, pageUrl, 'watching', 'Gallery');
+    sessionStore.mergeCandidateGroups(tabId, sessionStore.getSession(tabId)!.scanEpoch, [{
+      occurrenceKey: 'photo', primaryUrl: url, domOrder: 1,
+      variants: [{ url, role: 'src', source: 'img', naturalWidth: 100, naturalHeight: 100 }],
+    }]);
+    return { pageUrl, url, itemId: sessionStore.getSnapshot(tabId).items[0]!.itemId };
+  }
+
+  it('fetches HTTP images through their owning panel after installing the page Referer, then saves the bytes', async () => {
+    const tabId = 610;
+    const { pageUrl, url, itemId } = image(tabId);
+    let allowFetch!: () => void;
+    const acquire = vi.spyOn(refererRuleManager, 'acquireDownloadRule').mockImplementation(() =>
+      new Promise<void>((resolve) => { allowFetch = resolve; }));
+    const release = vi.spyOn(refererRuleManager, 'releaseDownloadRule').mockResolvedValue();
+    try {
+      (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(async (msg) => {
+        runtimeMessages.push(msg);
+        return { ok: true, data: { mode: 'object_url', objectUrl: 'blob:photo', finalUrl: url,
+          mimeType: 'image/jpeg', totalBytes: 123 } };
+      });
+      manager.enqueue(tabId, [itemId], 'image-panel');
+      expect(acquire).toHaveBeenCalledWith(`${tabId}:${itemId}`, pageUrl, url);
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+        type: 'PANEL_FETCH_HTTP_MEDIA_TO_OBJECT_URL',
+      }));
+      expect(startedDownloads).toHaveLength(0);
+      allowFetch();
+      await vi.waitFor(() => expect(startedDownloads).toHaveLength(1));
+      expect(runtimeMessages).toContainEqual(expect.objectContaining({
+        type: 'PANEL_FETCH_HTTP_MEDIA_TO_OBJECT_URL', mediaMode: 'image',
+        recipientPanelId: 'image-panel', tabId, itemId, url, maxBytes: BLOB_DOWNLOAD_MAX_BYTES,
+      }));
+      expect(startedDownloads[0]).toMatchObject({ url: 'blob:photo', filename: 'Gallery/example.jpg' });
+      expect(sessionStore.getSnapshot(tabId).downloads[itemId]).toMatchObject({
+        targetUrl: url, status: 'in_progress', totalBytes: 123,
+      });
+      expect(release).toHaveBeenCalledWith(`${tabId}:${itemId}`);
+      manager.handleDownloadDelta({ id: startedDownloads[0]!.id, state: { current: 'complete' } });
+      expect(runtimeMessages).toContainEqual(expect.objectContaining({
+        type: 'PANEL_REVOKE_OBJECT_URL', objectUrl: 'blob:photo',
+      }));
+    } finally { acquire.mockRestore(); release.mockRestore(); }
+  });
+
+  it('keeps image Referer rules for oversized direct downloads and releases them on interruption', async () => {
+    const tabId = 611;
+    const { itemId, url } = image(tabId);
+    const acquire = vi.spyOn(refererRuleManager, 'acquireDownloadRule').mockResolvedValue();
+    const release = vi.spyOn(refererRuleManager, 'releaseDownloadRule').mockResolvedValue();
+    try {
+      (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true,
+        data: { mode: 'direct_url_fallback', finalUrl: url, totalBytes: BLOB_DOWNLOAD_MAX_BYTES + 1 } });
+      manager.enqueue(tabId, [itemId], 'image-panel');
+      await vi.waitFor(() => expect(startedDownloads).toHaveLength(1));
+      expect(startedDownloads[0]!.url).toBe(url);
+      expect(release).not.toHaveBeenCalled();
+      manager.handleDownloadDelta({ id: startedDownloads[0]!.id, state: { current: 'interrupted' },
+        error: { current: 'SERVER_FORBIDDEN' } });
+      expect(release).toHaveBeenCalledWith(`${tabId}:${itemId}`);
+    } finally { acquire.mockRestore(); release.mockRestore(); }
+  });
+
+  it('cancels an HTTP image fetch and disposes a late ObjectURL without starting a download', async () => {
+    const tabId = 612;
+    const { itemId, url } = image(tabId);
+    let finish!: (value: unknown) => void;
+    (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(async (msg) => {
+      runtimeMessages.push(msg);
+      if (msg.type === 'PANEL_FETCH_HTTP_MEDIA_TO_OBJECT_URL') {
+        return new Promise((resolve) => { finish = resolve; });
+      }
+      return { ok: true };
+    });
+    manager.enqueue(tabId, [itemId], 'image-panel');
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    expect(await manager.cancelDownload(tabId, itemId)).toBe(true);
+    expect(runtimeMessages).toContainEqual(expect.objectContaining({ type: 'PANEL_ABORT_HTTP_FETCH' }));
+    finish({ ok: true, data: { mode: 'object_url', objectUrl: 'blob:late-photo', finalUrl: url } });
+    await vi.waitFor(() => expect(runtimeMessages).toContainEqual(expect.objectContaining({
+      type: 'PANEL_REVOKE_OBJECT_URL', objectUrl: 'blob:late-photo',
+    })));
+    expect(startedDownloads).toHaveLength(0);
+    expect(sessionStore.getSnapshot(tabId).downloads[itemId]?.status).toBe('canceled');
+  });
+
+  it('reports denied image fetches as retryable failures without saving an error response', async () => {
+    const tabId = 613;
+    const { itemId } = image(tabId);
+    (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false, code: 'HTTP_403', error: 'HTTP 403',
+    });
+    manager.enqueue(tabId, [itemId], 'image-panel');
+    await vi.waitFor(() => expect(sessionStore.getSnapshot(tabId).downloads[itemId]?.status).toBe('failed'));
+    expect(sessionStore.getSnapshot(tabId).downloads[itemId]).toMatchObject({
+      errorCode: 'HTTP_403', errorCategory: 'auth_or_forbidden', retryable: true,
+    });
+    expect(startedDownloads).toHaveLength(0);
   });
 
   it('blocks non-ready video streams at Readiness Gate while allowing ready MP4 and images concurrently', async () => {
@@ -326,7 +430,7 @@ describe('DownloadManager (Dual-Lane & Readiness Gate)', () => {
     (chrome.runtime.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
       async (msg: { type?: string; transferId?: string; itemId?: string }) => {
         runtimeMessages.push(msg);
-        if (msg?.type === 'PANEL_FETCH_HTTP_VIDEO_TO_OBJECT_URL') {
+        if (msg?.type === 'PANEL_FETCH_HTTP_MEDIA_TO_OBJECT_URL') {
           if (msg.itemId === 'vid_1') {
             manager.handleHttpFetchProgress(tabId, 'vid_1', msg.transferId!, 6_000_000, 13_364_887);
             return {
@@ -368,13 +472,13 @@ describe('DownloadManager (Dual-Lane & Readiness Gate)', () => {
       objectUrl: mintedObjectUrl,
     });
 
-    // Cancel vid_2 mid-HTTP-stream -> sends PANEL_ABORT_HTTP_VIDEO_FETCH and marks canceled immediately
+    // Cancel vid_2 mid-HTTP-stream and mark canceled immediately
     const canceledMidStream = await manager.cancelDownload(tabId, 'vid_2');
     expect(canceledMidStream).toBe(true);
     expect(sessionStore.getSnapshot(tabId).downloads['vid_2']?.status).toBe('canceled');
     expect(
       runtimeMessages.some(
-        (m) => (m as { type?: string }).type === 'PANEL_ABORT_HTTP_VIDEO_FETCH',
+        (m) => (m as { type?: string }).type === 'PANEL_ABORT_HTTP_FETCH',
       ),
     ).toBe(true);
 

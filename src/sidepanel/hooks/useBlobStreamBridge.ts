@@ -3,11 +3,12 @@ import { BLOB_STREAM_CHUNK_BYTES, PORT_NAMES, VIDEO_BLOB_MAX_BYTES } from '@shar
 import {
   isBgToPanelRpc,
   type BlobStreamPortMessage,
-  type HttpVideoFetchResponse,
+  type HttpMediaFetchResponse,
   type MessageResult,
   type PanelToBackgroundMessage,
 } from '@shared/messages';
 import { inferVideoFormat, parseContentRangeTotalBytes } from '@shared/video-utils';
+import type { MediaMode } from '@shared/types';
 import { PANEL_INSTANCE_ID } from '../panel-instance';
 
 const HTTP_BLOB_SLICE_FLUSH_BYTES = 8 * 1024 * 1024; // 8 MB slices keep V8 heap flat
@@ -58,8 +59,8 @@ export function releaseSidePanelObjectUrl(objectUrl: string): void {
 }
 
 /**
- * Zero-overhead receiver for >16MB video `blob:` streams inside Side Panel's `Window` scope.
- * Completely idle until the user clicks Download on a large page-origin `blob:` video.
+ * On-demand receiver for authenticated HTTP media and large page-origin `blob:` videos.
+ * Completely idle until the user clicks Download.
  * Reconstructs chunks into a native `Blob`, mints `blob:chrome-extension://...` via `URL.createObjectURL`,
  * and revokes it immediately after Chrome finishes or cancels the download.
  */
@@ -89,14 +90,16 @@ export function useBlobStreamBridge(): void {
       } catch {}
     };
 
-    const streamHttpVideoToObjectUrl = async (params: {
+    const streamHttpMediaToObjectUrl = async (params: {
+      mediaMode: MediaMode;
       tabId: number;
       itemId: string;
       transferId: string;
       url: string;
       maxBytes: number;
-    }): Promise<MessageResult<HttpVideoFetchResponse>> => {
-      const { tabId, itemId, transferId, url, maxBytes } = params;
+    }): Promise<MessageResult<HttpMediaFetchResponse>> => {
+      const { mediaMode, tabId, itemId, transferId, url, maxBytes } = params;
+      const mediaLabel = mediaMode === 'image' ? '画像' : '動画';
       const controller = new AbortController();
       activeHttpControllers.set(transferId, controller);
 
@@ -114,6 +117,7 @@ export function useBlobStreamBridge(): void {
         });
 
         if (!response.ok) {
+          await response.body?.cancel().catch(() => {});
           return {
             ok: false,
             error: `HTTP ${response.status}`,
@@ -130,7 +134,7 @@ export function useBlobStreamBridge(): void {
           } catch {}
           return {
             ok: false,
-            error: '動画データの代わりにHTMLページが返されました（認証または期限切れの可能性があります）',
+            error: `${mediaLabel}データの代わりにHTMLページが返されました（認証または期限切れの可能性があります）`,
             code: 'HTML_RESPONSE',
           };
         }
@@ -171,13 +175,15 @@ export function useBlobStreamBridge(): void {
 
         const inferredFmt = inferVideoFormat(finalUrl, cleanMime || undefined);
         const resolvedMime =
-          cleanMime && cleanMime.startsWith('video/')
-            ? cleanMime
-            : inferredFmt === 'webm'
-              ? 'video/webm'
-              : inferredFmt === 'mov'
-                ? 'video/quicktime'
-                : 'video/mp4';
+          mediaMode === 'image'
+            ? cleanMime || 'application/octet-stream'
+            : cleanMime && cleanMime.startsWith('video/')
+              ? cleanMime
+              : inferredFmt === 'webm'
+                ? 'video/webm'
+                : inferredFmt === 'mov'
+                  ? 'video/quicktime'
+                  : 'video/mp4';
 
         if (!response.body) {
           const blob = await response.blob();
@@ -254,7 +260,7 @@ export function useBlobStreamBridge(): void {
         if (finalBlob.size === 0) {
           return {
             ok: false,
-            error: '空の動画データ (0 bytes) が返されました',
+            error: `空の${mediaLabel}データ (0 bytes) が返されました`,
             code: 'EMPTY_RESPONSE',
           };
         }
@@ -449,8 +455,9 @@ export function useBlobStreamBridge(): void {
         return true;
       }
 
-      if (message.type === 'PANEL_FETCH_HTTP_VIDEO_TO_OBJECT_URL') {
-        void streamHttpVideoToObjectUrl({
+      if (message.type === 'PANEL_FETCH_HTTP_MEDIA_TO_OBJECT_URL') {
+        void streamHttpMediaToObjectUrl({
+          mediaMode: message.mediaMode,
           tabId: message.tabId,
           itemId: message.itemId,
           transferId: message.transferId,
@@ -462,7 +469,7 @@ export function useBlobStreamBridge(): void {
         return true;
       }
 
-      if (message.type === 'PANEL_ABORT_HTTP_VIDEO_FETCH') {
+      if (message.type === 'PANEL_ABORT_HTTP_FETCH') {
         const ctrl = activeHttpControllers.get(message.transferId);
         if (ctrl) {
           ctrl.abort();

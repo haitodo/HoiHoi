@@ -184,7 +184,7 @@ export type BlobStreamPortMessage =
       error: string;
     };
 
-export type HttpVideoFetchResponse =
+export type HttpMediaFetchResponse =
   | {
       mode: 'object_url';
       objectUrl: string;
@@ -211,7 +211,8 @@ type PanelInternalCommand =
     }
   | {
       channel: 'WIC_BG_TO_PANEL_RPC';
-      type: 'PANEL_FETCH_HTTP_VIDEO_TO_OBJECT_URL';
+      type: 'PANEL_FETCH_HTTP_MEDIA_TO_OBJECT_URL';
+      mediaMode: MediaMode;
       tabId: number;
       itemId: string;
       transferId: string;
@@ -220,7 +221,7 @@ type PanelInternalCommand =
     }
   | {
       channel: 'WIC_BG_TO_PANEL_RPC';
-      type: 'PANEL_ABORT_HTTP_VIDEO_FETCH';
+      type: 'PANEL_ABORT_HTTP_FETCH';
       transferId: string;
     }
   | {
