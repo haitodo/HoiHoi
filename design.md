@@ -8,7 +8,7 @@
 
 ### 都度実行の追加スキャン（仕様v1.2）
 
-画像モードの折りたたみUIから寸法取得・自動スクロール・別ページ収集を明示開始する。通常スキャンで自動開始せず、設定を永続化しない。Panel → Background → Contentの専用Portを1回の実行に割り当て、所有パネルの切断・対象変更・再スキャンでAbortControllerを停止する。結果は既存の候補・寸法通知へ統合し、実行進捗だけを専用Portで返す。Backgroundは監視対象・ページURL・scanEpochを確認する。
+画像モード上部のクイックツールバーUIから寸法取得・自動スクロール・別ページ収集を明示開始する（トグル不要の1ステップ操作、長文説明はツールチップに格納し省スペース化）。通常スキャンで自動開始せず、設定を永続化しない。Panel → Background → Contentの専用Portを1回の実行に割り当て、所有パネルの切断・対象変更・再スキャンでAbortControllerを停止する。結果は既存の候補・寸法通知へ統合し、実行進捗だけを専用Portで返す。Backgroundは監視対象・ページURL・scanEpochを確認する。
 
 `RawVariantCandidate` / `ImageVariant` の任意フィールド `sourcePageUrl` は別ページから集めた画像の取得元を保持する。保存時はこれをRefererに使い、通常画像はセッションのページURLを使う。DOMParserで取得HTMLを解析し、スクリプトを実行しない。上限と寿命は `performance.md` を参照。
 

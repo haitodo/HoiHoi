@@ -114,3 +114,227 @@ input, select, button {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(107, 114, 128, 0.7);
 }
+
+/* Scan Toolbar styles */
+.scan-toolbar {
+  padding: 6px 12px;
+  background-color: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease;
+}
+
+.scan-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.scan-action-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-input);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.scan-action-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-text-muted);
+}
+
+.scan-action-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.scan-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.scan-action-btn.has-highlight {
+  background: var(--color-primary-subtle);
+  border-color: var(--color-primary-subtle-border);
+  color: var(--color-primary-text);
+  font-weight: 600;
+}
+
+.scan-action-btn.has-highlight:hover:not(:disabled) {
+  background: var(--color-primary-subtle-border);
+}
+
+.scan-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background-color: var(--color-primary);
+  color: #ffffff;
+  line-height: 1.2;
+}
+
+.scan-running-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background-color: var(--color-primary-subtle);
+  border: 1px solid var(--color-primary-subtle-border);
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+}
+
+.scan-running-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-primary-text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.scan-stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background-color: var(--color-danger-subtle);
+  border: 1px solid var(--color-danger-border);
+  color: var(--color-danger-text);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.scan-stop-btn:hover {
+  background-color: var(--color-danger-border);
+}
+
+.scan-progress-track {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(99, 102, 241, 0.15);
+  overflow: hidden;
+}
+
+.scan-progress-bar {
+  height: 100%;
+  width: 35%;
+  background: var(--color-primary);
+  border-radius: 1px;
+  animation: scan-indeterminate 1.4s ease-in-out infinite;
+}
+
+.scan-notice-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  animation: scan-fade-in 0.2s ease;
+}
+
+.scan-notice-bar.notice-completed {
+  background-color: var(--color-success-subtle);
+  border: 1px solid var(--color-success-border);
+  color: var(--color-success-text);
+}
+
+.scan-notice-bar.notice-stopped {
+  background-color: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.scan-notice-bar.notice-failed {
+  background-color: var(--color-danger-subtle);
+  border: 1px solid var(--color-danger-border);
+  color: var(--color-danger-text);
+}
+
+.scan-notice-close {
+  background: transparent;
+  border: none;
+  font-size: 13px;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0.65;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scan-notice-close:hover {
+  opacity: 1;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes scan-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+@keyframes scan-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
