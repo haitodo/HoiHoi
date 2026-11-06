@@ -10,7 +10,7 @@ interface VideoGridProps {
   selectedVideoIds: Set<string>;
   downloads: Record<string, ItemDownloadState>;
   cardSize?: CardSize;
-  onToggleSelect: (itemId: string) => void;
+  onToggleSelect: (itemId: string, e: React.MouseEvent) => void;
   onSelectVariant: (itemId: string, variantUrl: string) => void;
   onReportVideoMetadata: (
     itemId: string,
@@ -183,7 +183,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
                   downloadState={downloads[video.itemId]}
                   cardSize={cardSize}
                   thumbnailHeight={VIDEO_STAGE_HEIGHTS[cardSize]}
-                  onToggleSelect={() => onToggleSelect(video.itemId)}
+                  onToggleSelect={(e) => onToggleSelect(video.itemId, e)}
                   onToggleInlinePlay={() =>
                     setActivePlayingId((prev) =>
                       prev === video.itemId ? null : video.itemId,

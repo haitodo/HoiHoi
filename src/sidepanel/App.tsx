@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { extractFilenameForSort } from '@shared/filename-utils';
 import type {
   CardSize,
@@ -149,6 +149,7 @@ export function App() {
     triggerRescan,
     toggleSelection,
     selectAllVisible,
+    deselectVisible,
     clearAllSelection,
     selectVariant,
     batchSelectVariants,
@@ -600,6 +601,85 @@ export function App() {
     return count;
   }, [selectedVideoIdsSet, visibleVideoIdsSet]);
 
+  const visibleSelectedImageIds = useMemo(
+    () => visibleItemIds.filter((id) => selectedIdsSet.has(id)),
+    [visibleItemIds, selectedIdsSet],
+  );
+  const visibleSelectedVideoIds = useMemo(
+    () => visibleVideoIds.filter((id) => selectedVideoIdsSet.has(id)),
+    [visibleVideoIds, selectedVideoIdsSet],
+  );
+
+  const lastSelectedImageIdRef = useRef<string | null>(null);
+  const lastSelectedVideoIdRef = useRef<string | null>(null);
+
+  // Reset shift-click anchor whenever active tab or media mode changes
+  useEffect(() => {
+    lastSelectedImageIdRef.current = null;
+    lastSelectedVideoIdRef.current = null;
+  }, [activeTabId, mediaMode]);
+
+  const handleToggleImageSelect = useCallback(
+    (targetId: string, e?: React.MouseEvent) => {
+      const isShift = Boolean(e?.shiftKey);
+      const lastId = lastSelectedImageIdRef.current;
+      lastSelectedImageIdRef.current = targetId;
+
+      if (isShift && lastId && lastId !== targetId) {
+        const fromIdx = filteredItems.findIndex((item) => item.itemId === lastId);
+        const toIdx = filteredItems.findIndex((item) => item.itemId === targetId);
+        if (fromIdx !== -1 && toIdx !== -1) {
+          const start = Math.min(fromIdx, toIdx);
+          const end = Math.max(fromIdx, toIdx);
+          const rangeIds = filteredItems.slice(start, end + 1).map((item) => item.itemId);
+
+          const shouldSelect = selectedIdsSet.has(lastId) || !selectedIdsSet.has(targetId);
+          if (shouldSelect) {
+            void selectAllVisible(rangeIds, 'image');
+          } else {
+            void deselectVisible(rangeIds, 'image');
+          }
+          return;
+        }
+      }
+
+      void toggleSelection(targetId, 'image');
+    },
+    [filteredItems, selectedIdsSet, selectAllVisible, deselectVisible, toggleSelection],
+  );
+
+  const handleToggleVideoSelect = useCallback(
+    (targetId: string, e?: React.MouseEvent) => {
+      const isShift = Boolean(e?.shiftKey);
+      const lastId = lastSelectedVideoIdRef.current;
+      lastSelectedVideoIdRef.current = targetId;
+
+      if (isShift && lastId && lastId !== targetId) {
+        const fromIdx = filteredVideos.findIndex((v) => v.itemId === lastId);
+        const toIdx = filteredVideos.findIndex((v) => v.itemId === targetId);
+        if (fromIdx !== -1 && toIdx !== -1) {
+          const start = Math.min(fromIdx, toIdx);
+          const end = Math.max(fromIdx, toIdx);
+          const rangeVideos = filteredVideos.slice(start, end + 1);
+          const selectableRangeIds = rangeVideos
+            .filter((v) => getActiveVideoVariant(v.variants, v.selectedUrl)?.readiness === 'ready')
+            .map((v) => v.itemId);
+
+          const shouldSelect = selectedVideoIdsSet.has(lastId) || !selectedVideoIdsSet.has(targetId);
+          if (shouldSelect) {
+            void selectAllVisible(selectableRangeIds, 'video');
+          } else {
+            void deselectVisible(selectableRangeIds, 'video');
+          }
+          return;
+        }
+      }
+
+      void toggleSelection(targetId, 'video');
+    },
+    [filteredVideos, selectedVideoIdsSet, selectAllVisible, deselectVisible, toggleSelection],
+  );
+
   const previewItemIndex = useMemo(() => {
     if (!previewItemId) return -1;
     return filteredItems.findIndex((item) => item.itemId === previewItemId);
@@ -721,10 +801,12 @@ export function App() {
                 selectedCount={selectedIdsSet.size}
                 hiddenSelectedCount={hiddenSelectedImageCount}
                 visibleCount={filteredItems.length}
+                visibleSelectedCount={visibleSelectedImageIds.length}
                 hasVariants={hasImageVariants}
                 cardSize={cardSize}
                 onCardSizeChange={handleCardSizeChange}
                 onSelectVisible={() => void selectAllVisible(visibleItemIds, 'image')}
+                onDeselectVisible={() => void deselectVisible(visibleSelectedImageIds, 'image')}
                 onClearAll={() => void clearAllSelection('image')}
                 onDownloadSelected={() => void enqueueDownloads(Array.from(selectedIdsSet))}
                 onApplyVariantPreference={(target) =>
@@ -749,7 +831,7 @@ export function App() {
               selectedIds={selectedIdsSet}
               downloads={snapshot?.downloads || {}}
               cardSize={cardSize}
-              onToggleSelect={(id) => void toggleSelection(id, 'image')}
+              onToggleSelect={handleToggleImageSelect}
               onSelectVariant={selectVariant}
               onReportDimensions={reportThumbDimensions}
               onDownloadItem={(itemId) => void enqueueDownloads([itemId])}
@@ -781,12 +863,14 @@ export function App() {
                 hiddenSelectedCount={hiddenSelectedVideoCount}
                 visibleCount={filteredVideos.length}
                 selectableVisibleCount={selectableVisibleVideoIds.length}
+                visibleSelectedCount={visibleSelectedVideoIds.length}
                 hasVariants={hasVideoVariants}
                 cardSize={videoCardSize}
                 onCardSizeChange={handleVideoCardSizeChange}
                 onSelectVisible={() =>
                   void selectAllVisible(selectableVisibleVideoIds, 'video')
                 }
+                onDeselectVisible={() => void deselectVisible(visibleSelectedVideoIds, 'video')}
                 onClearAll={() => void clearAllSelection('video')}
                 onDownloadSelected={handleBatchVideoDownload}
                 onApplyVariantPreference={(target) =>
@@ -812,7 +896,7 @@ export function App() {
               selectedVideoIds={selectedVideoIdsSet}
               downloads={snapshot?.downloads || {}}
               cardSize={videoCardSize}
-              onToggleSelect={(id) => void toggleSelection(id, 'video')}
+              onToggleSelect={handleToggleVideoSelect}
               onSelectVariant={selectVariant}
               onReportVideoMetadata={reportVideoMetadata}
               onResolveHlsManifest={async (itemId, manifestUrl) => {

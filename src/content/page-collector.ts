@@ -37,7 +37,17 @@ export async function collectPages(options: {
   while (current < queue.length) {
     signal.throwIfAborted();
     const url = queue[current]!;
-    const page = current === 0 ? initial : await readPage(url);
+    let page: CollectionPage;
+    try {
+      page = current === 0 ? initial : await readPage(url);
+    } catch (err) {
+      if (signal.aborted) throw err;
+      if (current > 0) {
+        limited = true;
+        break;
+      }
+      throw err;
+    }
     signal.throwIfAborted();
     if (normalize(page.url) !== url) throw new Error('別のページに移動したため収集を停止しました');
     if (album && page.groups.length === 0) throw new Error('本文の画像を取得できませんでした。ログイン状態やページの読み込み方式を確認してください');

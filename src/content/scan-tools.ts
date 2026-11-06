@@ -94,7 +94,8 @@ export async function scrollPage(signal: AbortSignal, onProgress: (steps: number
       if (stable >= AUTO_SCROLL_BOTTOM_STABLE_CHECKS) return;
       window.scrollTo({ left: original.left, top: Math.min(height, window.scrollY + window.innerHeight * AUTO_SCROLL_VIEWPORT_FRACTION), behavior: 'instant' });
     }
-    throw new Error('スクロール回数の上限に到達しました');
+    // Completed full 200 steps without error
+    return;
   } finally {
     signal.removeEventListener('abort', abort);
     window.removeEventListener('wheel', manual);

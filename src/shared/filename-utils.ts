@@ -105,9 +105,10 @@ export function buildSafeDownloadFilename(options: {
   folderName?: string;
   itemIndex?: number;
   format?: ImageFormat;
+  mimeHint?: string;
 }): string {
-  const { targetUrl, domain, pageTitle, pageUrl, folderName, itemIndex = 1, format } = options;
-  const inferredFormat = format ?? inferImageFormat(targetUrl);
+  const { targetUrl, domain, pageTitle, pageUrl, folderName, itemIndex = 1, format, mimeHint } = options;
+  const inferredFormat = format && format !== 'unknown' ? format : inferImageFormat(targetUrl, mimeHint);
   const extFromFormat = FORMAT_TO_EXTENSION[inferredFormat];
 
   let rawStem = '';
@@ -171,7 +172,7 @@ export function buildSafeDownloadFilename(options: {
   let finalExt = rawExt;
   // If no extension or rawExt is not typical of the inferred format, use standard extension
   if (!finalExt || (extFromFormat && !isValidExtensionForFormat(finalExt, inferredFormat))) {
-    finalExt = extFromFormat;
+    finalExt = extFromFormat || (rawExt ? rawExt : '.jpg');
   }
 
   const safeFilename = `${cleanStem}${finalExt}`;

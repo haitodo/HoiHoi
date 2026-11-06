@@ -49,4 +49,23 @@ describe('on-demand album collection', () => {
       onProgress: vi.fn() })).rejects.toThrow('別のページ');
     expect(onPage).toHaveBeenCalledOnce();
   });
+  it('gracefully stops on subsequent page fetch failure while preserving previously collected pages', async () => {
+    const onPage = vi.fn(async () => {});
+    const readPage = vi.fn(async (url: string) => {
+      if (url.includes('page=2')) {
+        return page(2, [`${base}&page=3`]);
+      }
+      throw new Error('404 Not Found');
+    });
+    const limited = await collectPages({
+      initial: page(1, [`${base}&page=2`]),
+      signal: new AbortController().signal,
+      readPage,
+      onPage,
+      onProgress: vi.fn(),
+    });
+    // Page 1 and Page 2 were collected; Page 3 failed and stopped gracefully
+    expect(onPage).toHaveBeenCalledTimes(2);
+    expect(limited).toBe(true);
+  });
 });

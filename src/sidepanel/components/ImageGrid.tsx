@@ -8,7 +8,7 @@ interface ImageGridProps {
   selectedIds: Set<string>;
   downloads: Record<string, ItemDownloadState>;
   cardSize?: CardSize;
-  onToggleSelect: (itemId: string) => void;
+  onToggleSelect: (itemId: string, e: React.MouseEvent) => void;
   onSelectVariant: (itemId: string, variantUrl: string) => void;
   onReportDimensions: (itemId: string, variantUrl: string, width: number, height: number) => void;
   onDownloadItem: (itemId: string) => void;
@@ -156,7 +156,7 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
                   downloadState={downloads[item.itemId]}
                   cardSize={cardSize}
                   thumbnailHeight={THUMBNAIL_HEIGHTS[cardSize]}
-                  onToggleSelect={() => onToggleSelect(item.itemId)}
+                  onToggleSelect={(e) => onToggleSelect(item.itemId, e)}
                   onSelectVariant={(variantUrl) => onSelectVariant(item.itemId, variantUrl)}
                   onReportDimensions={(variantUrl, w, h) =>
                     onReportDimensions(item.itemId, variantUrl, w, h)

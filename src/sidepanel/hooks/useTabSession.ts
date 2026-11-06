@@ -273,6 +273,21 @@ export function useTabSession(tabId: number | null) {
     [tabId, sendPanelMessage],
   );
 
+  const deselectVisible = useCallback(
+    async (itemIds: string[], mediaMode: MediaMode = 'image') => {
+      if (tabId === null) return;
+      const msg: PanelToBackgroundMessage = {
+        channel: 'WIC_PANEL_TO_BG',
+        type: 'PANEL_UPDATE_SELECTION',
+        tabId,
+        mediaMode,
+        mutation: { mode: 'remove_many', itemIds },
+      };
+      await sendPanelMessage(msg);
+    },
+    [tabId, sendPanelMessage],
+  );
+
   const clearAllSelection = useCallback(
     async (mediaMode: MediaMode = 'image') => {
       if (tabId === null) return;
@@ -480,6 +495,7 @@ export function useTabSession(tabId: number | null) {
     triggerRescan,
     toggleSelection,
     selectAllVisible,
+    deselectVisible,
     clearAllSelection,
     selectVariant,
     batchSelectVariants,

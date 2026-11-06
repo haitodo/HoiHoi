@@ -554,6 +554,7 @@ export class DownloadManager {
       pageTitle: session.pageTitle ?? session.domain ?? 'images',
       pageUrl: session.pageUrl,
       format: variant?.format,
+      mimeHint: preparedHttp?.mimeType,
     });
 
     await this.startChromeDownload({

@@ -7,7 +7,7 @@ interface ImageCardProps {
   downloadState?: ItemDownloadState;
   thumbnailHeight?: number;
   cardSize?: CardSize;
-  onToggleSelect: () => void;
+  onToggleSelect: (e: React.MouseEvent) => void;
   onSelectVariant: (variantUrl: string) => void;
   onReportDimensions: (variantUrl: string, width: number, height: number) => void;
   onDownload: () => void;
@@ -72,7 +72,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
 
   return (
     <div
-      onClick={onToggleSelect}
+      onClick={(e) => onToggleSelect(e)}
       onDoubleClick={(e) => {
         e.stopPropagation();
         onOpenPreview?.();
@@ -106,12 +106,15 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           alignItems: 'center',
           backdropFilter: 'blur(4px)',
         }}
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleSelect(e);
+        }}
       >
         <input
           type="checkbox"
           checked={isSelected}
-          onChange={onToggleSelect}
+          onChange={() => {}}
           style={{ cursor: 'pointer', margin: 0 }}
         />
       </div>

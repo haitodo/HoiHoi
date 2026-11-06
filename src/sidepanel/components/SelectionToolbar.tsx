@@ -7,10 +7,12 @@ interface SelectionToolbarProps {
   hiddenSelectedCount: number;
   visibleCount: number;
   selectableVisibleCount?: number;
+  visibleSelectedCount?: number;
   hasVariants?: boolean;
   cardSize?: CardSize;
   onCardSizeChange?: (size: CardSize) => void;
   onSelectVisible: () => void;
+  onDeselectVisible?: () => void;
   onClearAll: () => void;
   onDownloadSelected: () => void;
   onApplyVariantPreference?: (target: 'high_res' | 'display') => void;
@@ -22,10 +24,12 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   hiddenSelectedCount,
   visibleCount,
   selectableVisibleCount,
+  visibleSelectedCount = 0,
   hasVariants,
   cardSize = 'medium',
   onCardSizeChange,
   onSelectVisible,
+  onDeselectVisible,
   onClearAll,
   onDownloadSelected,
   onApplyVariantPreference,
@@ -182,6 +186,26 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
         >
           表示中を全選択 ({effectiveSelectableCount}件)
         </button>
+
+        {onDeselectVisible && (
+          <button
+            type="button"
+            onClick={onDeselectVisible}
+            disabled={visibleSelectedCount === 0}
+            style={{
+              padding: '3px 8px',
+              fontSize: 11,
+              border: '1px solid var(--color-border-input)',
+              borderRadius: 4,
+              backgroundColor: 'var(--color-bg-subtle)',
+              color: 'var(--color-text-primary)',
+              cursor: visibleSelectedCount === 0 ? 'not-allowed' : 'pointer',
+            }}
+            title={`現在表示されている選択中の${mediaNoun}のみ解除します（非表示中の選択は保持）`}
+          >
+            表示中を解除
+          </button>
+        )}
 
         <button
           type="button"

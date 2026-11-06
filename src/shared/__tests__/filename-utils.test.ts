@@ -138,6 +138,19 @@ describe('filename-utils', () => {
         .toBe('Album_Site/video.mp4');
     });
 
+    it('supplies appropriate extension from mimeHint or defaults to .jpg when URL has no extension', () => {
+      const withMime = buildSafeDownloadFilename({
+        targetUrl: 'https://example.com/api/get_image?id=999',
+        mimeHint: 'image/png',
+      });
+      expect(withMime).toBe('get_image.png');
+
+      const fallback = buildSafeDownloadFilename({
+        targetUrl: 'https://example.com/dynamic/raw_asset',
+      });
+      expect(fallback).toBe('raw_asset.jpg');
+    });
+
     it('falls back to domain folder when pageTitle is empty', () => {
       const name = buildSafeDownloadFilename({
         targetUrl: 'https://example.com/gallery/landscape.jpg',

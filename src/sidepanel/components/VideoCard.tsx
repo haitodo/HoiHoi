@@ -19,7 +19,7 @@ interface VideoCardProps {
   downloadState?: ItemDownloadState;
   thumbnailHeight?: number;
   cardSize?: CardSize;
-  onToggleSelect: () => void;
+  onToggleSelect: (e: React.MouseEvent) => void;
   onToggleInlinePlay: () => void;
   onSelectVariant: (variantUrl: string) => void;
   onReportVideoMetadata: (
@@ -116,9 +116,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       ? Math.min(100, Math.round((downloadState.bytesReceived / downloadState.totalBytes) * 100))
       : null;
 
-  const handleCardClick = () => {
+  const handleCardClick = (e: React.MouseEvent) => {
     if (canSelect) {
-      onToggleSelect();
+      onToggleSelect(e);
     }
   };
 
@@ -227,13 +227,18 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           gap: 4,
           backdropFilter: 'blur(4px)',
         }}
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (canSelect) {
+            onToggleSelect(e);
+          }
+        }}
       >
         {canSelect ? (
           <input
             type="checkbox"
             checked={isSelected}
-            onChange={onToggleSelect}
+            onChange={() => {}}
             style={{ cursor: 'pointer', margin: 0 }}
             title="ダウンロード対象として選択"
           />
