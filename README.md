@@ -100,4 +100,6 @@ Chrome 拡張機能は通常、読み込みフォルダのパスやパッケー�
   - `src/sidepanel/hooks/useActiveTabId.ts`: tabs権限不要のアクティブタブ追跡
   - `src/sidepanel/hooks/useTabSession.ts`: revision 自己修復型 Delta 購読
   - `src/sidepanel/components/*`: Header, FilterBar, SelectionToolbar, ImageGrid (TanStack Virtual 行仮想化), ImageCard, DownloadFooter, EmptyOrStatusView
-  - `src/sidepanel/App.tsx`: 統合レイアウト・フィルター・選択状態管理
+  - `src/sidepanel/App.tsx`: 画像・動画ビュー、プレビュー、保存操作の組み立て
+  - `src/sidepanel/hooks/usePanelPreferences.ts` / `useMediaSelection.ts`: 表示設定の永続化、表示中の一括操作と Shift+クリックによる範囲選択
+  - `src/sidepanel/utils/media-view.ts`: 画像・動画一覧の絞り込みと並べ替え
