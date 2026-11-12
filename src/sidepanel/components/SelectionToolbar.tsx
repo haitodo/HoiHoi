@@ -11,6 +11,8 @@ interface SelectionToolbarProps {
   hasVariants?: boolean;
   cardSize?: CardSize;
   onCardSizeChange?: (size: CardSize) => void;
+  autoSelectAll?: boolean;
+  onAutoSelectAllChange?: (enabled: boolean) => void;
   onSelectVisible: () => void;
   onDeselectVisible?: () => void;
   onClearAll: () => void;
@@ -28,6 +30,8 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   hasVariants,
   cardSize = 'medium',
   onCardSizeChange,
+  autoSelectAll,
+  onAutoSelectAllChange,
   onSelectVisible,
   onDeselectVisible,
   onClearAll,
@@ -146,6 +150,30 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
               大
             </button>
           </div>
+        )}
+
+        {mediaMode === 'image' && onAutoSelectAllChange && (
+          <label
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              cursor: 'pointer',
+              fontSize: 11,
+              color: 'var(--color-text-secondary)',
+              userSelect: 'none',
+              marginLeft: 2,
+            }}
+            title="ページスキャン時に検出された画像を自動で全選択します（一括取得・除外選択向け）"
+          >
+            <input
+              type="checkbox"
+              checked={autoSelectAll ?? true}
+              onChange={(e) => onAutoSelectAllChange(e.target.checked)}
+              style={{ cursor: 'pointer', margin: 0 }}
+            />
+            <span>スキャン時に全選択</span>
+          </label>
         )}
       </div>
 

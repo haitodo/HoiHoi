@@ -14,6 +14,7 @@ import { VideoFilterBar } from './components/VideoFilterBar';
 import { VideoGrid } from './components/VideoGrid';
 import { VideoLightboxModal } from './components/VideoLightboxModal';
 import { useActiveTabId } from './hooks/useActiveTabId';
+import { useAutoSelectOnScan } from './hooks/useAutoSelectOnScan';
 import { useBlobStreamBridge } from './hooks/useBlobStreamBridge';
 import { useMediaSelection } from './hooks/useMediaSelection';
 import { usePanelActivity } from './hooks/usePanelActivity';
@@ -109,6 +110,18 @@ export function App() {
     items: selectableImages,
     selectedIds: selectedImageIds,
   });
+
+  useAutoSelectOnScan({
+    enabled: imagePrefs.autoSelectAll,
+    mediaMode,
+    tabId: activeTabId,
+    scanEpoch: snapshot?.scanEpoch,
+    scanStatus,
+    items: selectableImages,
+    selectedIds: selectedImageIds,
+    onSelectItems: selectAllVisible,
+  });
+
   const videoSelection = useMediaSelection({
     ...selectionActions,
     mode: 'video',
@@ -235,6 +248,8 @@ export function App() {
                 hasVariants={hasImageVariants}
                 cardSize={imagePrefs.cardSize}
                 onCardSizeChange={imagePrefs.setCardSize}
+                autoSelectAll={imagePrefs.autoSelectAll}
+                onAutoSelectAllChange={imagePrefs.setAutoSelectAll}
                 onSelectVisible={imageSelection.onSelectVisible}
                 onDeselectVisible={imageSelection.onDeselectVisible}
                 onClearAll={() => void clearAllSelection('image')}

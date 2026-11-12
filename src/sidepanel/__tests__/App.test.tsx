@@ -240,4 +240,25 @@ describe('side panel media views', () => {
     ]);
     expect(panel.selectAllVisible).toHaveBeenCalledTimes(2);
   });
+
+  it('automatically selects scanned images by default, and can be toggled off via checkbox', () => {
+    const images = [image(1, 'auto1', 800), image(2, 'auto2', 800)];
+    render({ items: images, selectedIds: [] });
+
+    expect(panel.selectAllVisible).toHaveBeenCalledWith(['item_1', 'item_2'], 'image');
+    panel.selectAllVisible.mockClear();
+
+    const label = [...container.querySelectorAll('label')].find((l) => l.textContent?.includes('スキャン時に全選択'));
+    expect(label).toBeDefined();
+    const autoSelectCheckbox = label!.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(autoSelectCheckbox).toBeDefined();
+    expect(autoSelectCheckbox!.checked).toBe(true);
+
+    act(() => autoSelectCheckbox!.click());
+    expect(localStorage.getItem('wic_image_auto_select_all')).toBe('false');
+
+    const newImages = [image(3, 'auto3', 800)];
+    render({ scanEpoch: 2, items: newImages, selectedIds: [] });
+    expect(panel.selectAllVisible).not.toHaveBeenCalled();
+  });
 });

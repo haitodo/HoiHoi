@@ -113,6 +113,12 @@ export function usePanelPreferences() {
   const [videoFilter, setVideoFilter] = useStoredPreference(
     'wic_video_filter_preferences', DEFAULT_VIDEO_FILTER, parseVideoFilter, serializeVideoFilter,
   );
+  const [imageAutoSelectAll, setImageAutoSelectAll] = useStoredPreference<boolean>(
+    'wic_image_auto_select_all',
+    true,
+    (saved) => saved === 'true',
+    (value) => String(value),
+  );
   const resetImageFilter = useCallback(() => setImageFilter(DEFAULT_IMAGE_FILTER), [setImageFilter]);
   const resetVideoFilter = useCallback(() => setVideoFilter(DEFAULT_VIDEO_FILTER), [setVideoFilter]);
 
@@ -123,6 +129,7 @@ export function usePanelPreferences() {
       filter: imageFilter, setFilter: setImageFilter, resetFilter: resetImageFilter,
       sortOrder: imageSortOrder, setSortOrder: setImageSortOrder,
       cardSize: imageCardSize, setCardSize: setImageCardSize,
+      autoSelectAll: imageAutoSelectAll, setAutoSelectAll: setImageAutoSelectAll,
     },
     video: {
       filter: videoFilter, setFilter: setVideoFilter, resetFilter: resetVideoFilter,
