@@ -7,6 +7,7 @@ import { App } from '../App';
 
 const panel = vi.hoisted(() => ({
   snapshot: null as TabSessionSnapshot | null,
+  triggerRescan: vi.fn(),
   toggleSelection: vi.fn(),
   selectAllVisible: vi.fn(),
   deselectVisible: vi.fn(),
@@ -108,6 +109,17 @@ describe('side panel media views', () => {
     expect(button).toBeDefined();
     act(() => button!.click());
   }
+
+  it('can request a rescan while the panel is still searching for images', () => {
+    render({ scanStatus: 'scanning' });
+    expect(container.textContent).toContain('画像を探しています...');
+    clickButton('再スキャン');
+    expect(panel.triggerRescan).toHaveBeenCalledOnce();
+
+    render({ scanStatus: 'restricted' });
+    clickButton('再スキャン');
+    expect(panel.triggerRescan).toHaveBeenCalledOnce();
+  });
 
   it('loads saved image filters, keeps hidden selections, and only clears the visible selection', () => {
     localStorage.setItem('wic_filter_preferences', JSON.stringify({

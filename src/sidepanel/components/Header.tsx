@@ -119,7 +119,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           onClick={onRescan}
-          disabled={scanStatus === 'scanning' || scanStatus === 'restricted'}
+          disabled={scanStatus === 'restricted'}
           style={{
             padding: '4px 10px',
             fontSize: 12,
@@ -128,7 +128,7 @@ export const Header: React.FC<HeaderProps> = ({
             borderRadius: 6,
             backgroundColor: 'var(--color-bg-subtle)',
             color: 'var(--color-text-primary)',
-            cursor: scanStatus === 'scanning' ? 'not-allowed' : 'pointer',
+            cursor: scanStatus === 'restricted' ? 'not-allowed' : 'pointer',
             whiteSpace: 'nowrap',
           }}
           title="ページを再スキャンして新しい画像を統合します"

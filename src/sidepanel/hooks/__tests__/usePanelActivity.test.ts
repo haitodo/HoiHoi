@@ -123,4 +123,21 @@ describe('panel observation lifecycle', () => {
     messages.emit({ type: 'HOIHOI_SCANNER_READY', tabId: 10 }); render(10, value);
     expect(contents).toHaveLength(2);
   });
+
+  it('retries when injection is ready before the failed connection reports its disconnect', () => {
+    const value = snapshot(10, 'scanning', 2);
+    render(10, value);
+    messages.emit({ type: 'HOIHOI_SCANNER_READY', tabId: 10 });
+    render(10, value);
+    expect(contents).toHaveLength(1);
+
+    contents[0]?.onDisconnect.emit();
+    render(10, value);
+    expect(contents).toHaveLength(2);
+    expect(contents[1]?.postMessage).toHaveBeenCalledWith({ type: 'SCANNER_WATCH', scanEpoch: 2 });
+
+    contents[1]?.onDisconnect.emit();
+    render(10, value);
+    expect(contents).toHaveLength(2);
+  });
 });

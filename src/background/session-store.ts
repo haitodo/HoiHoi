@@ -346,10 +346,17 @@ export class SessionStore {
     tabId: number,
     scanStatus: ScanStatus,
     statusMessage?: string,
+    scanEpoch?: number,
   ): void {
     const session = this.getOrCreateSession(tabId);
-    if (session.scanStatus === scanStatus && session.statusMessage === statusMessage) return;
+    const nextEpoch = scanEpoch ?? session.scanEpoch;
+    if (
+      session.scanStatus === scanStatus &&
+      session.statusMessage === statusMessage &&
+      session.scanEpoch === nextEpoch
+    ) return;
     if (session.scanStatus === 'limit_reached' && scanStatus === 'watching') return;
+    session.scanEpoch = nextEpoch;
     session.scanStatus = scanStatus;
     session.statusMessage = statusMessage;
     session.revision += 1;

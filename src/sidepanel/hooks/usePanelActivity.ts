@@ -9,9 +9,7 @@ export function usePanelActivity(tabId: number | null, snapshot: TabSessionSnaps
   const [workerGeneration, setWorkerGeneration] = useState(0);
   const [scannerGeneration, setScannerGeneration] = useState(0);
   const backgroundPort = useRef<chrome.runtime.Port | null>(null);
-  const contentPort = useRef<chrome.runtime.Port | null>(null);
-  const epochRef = useRef(snapshot?.scanEpoch);
-  epochRef.current = snapshot?.scanEpoch;
+  const scannerConnection = useRef<{ port: chrome.runtime.Port; retryOnDisconnect: boolean } | null>(null);
   const watchable = snapshot?.tabId === tabId &&
     ['scanning', 'watching', 'limit_reached'].includes(snapshot.scanStatus);
   const watchedTabId = visible && watchable ? tabId : null;
@@ -25,7 +23,13 @@ export function usePanelActivity(tabId: number | null, snapshot: TabSessionSnaps
       if (message?.type === 'HOIHOI_BACKGROUND_READY') {
         setWorkerGeneration((value) => value + 1);
       } else if (message?.type === 'HOIHOI_SCANNER_READY' && message.tabId === targetRef.current) {
-        if (!contentPort.current) setScannerGeneration((value) => value + 1);
+        const connection = scannerConnection.current;
+        if (connection) {
+          // Injection can finish before Chrome reports that the initial port has no receiver.
+          connection.retryOnDisconnect = true;
+        } else {
+          setScannerGeneration((value) => value + 1);
+        }
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
@@ -62,16 +66,20 @@ export function usePanelActivity(tabId: number | null, snapshot: TabSessionSnaps
   }, [targetTabId]);
 
   useEffect(() => {
-    if (watchedTabId === null || !snapshot) return;
+    if (watchedTabId === null) return;
     const port = chrome.tabs.connect(watchedTabId, { name: PORT_NAMES.SCANNER_LIFECYCLE });
-    contentPort.current = port;
-    port.postMessage({ type: 'SCANNER_WATCH', scanEpoch: epochRef.current! } satisfies ScannerWatchMessage);
+    const connection = { port, retryOnDisconnect: false };
+    scannerConnection.current = connection;
     port.onDisconnect.addListener(() => {
       void chrome.runtime.lastError;
-      if (contentPort.current === port) contentPort.current = null;
+      if (scannerConnection.current !== connection) return;
+      scannerConnection.current = null;
+      if (connection.retryOnDisconnect && targetRef.current === watchedTabId) {
+        setScannerGeneration((value) => value + 1);
+      }
     });
     return () => {
-      if (contentPort.current === port) contentPort.current = null;
+      if (scannerConnection.current === connection) scannerConnection.current = null;
       port.disconnect();
     };
   }, [watchedTabId, scannerGeneration]);
@@ -79,9 +87,9 @@ export function usePanelActivity(tabId: number | null, snapshot: TabSessionSnaps
   useEffect(() => {
     if (snapshot?.scanEpoch === undefined) return;
     try {
-      contentPort.current?.postMessage({ type: 'SCANNER_WATCH', scanEpoch: snapshot.scanEpoch } satisfies ScannerWatchMessage);
+      scannerConnection.current?.port.postMessage({ type: 'SCANNER_WATCH', scanEpoch: snapshot.scanEpoch } satisfies ScannerWatchMessage);
     } catch {}
-  }, [snapshot?.scanEpoch]);
+  }, [watchedTabId, scannerGeneration, snapshot?.scanEpoch]);
 
   return visible;
 }

@@ -3,6 +3,8 @@ import type { MessageResult } from '@shared/messages';
 import { refererRuleManager } from './referer-rules';
 import { sessionStore } from './session-store';
 
+const pendingScanStarts = new Map<number, Promise<boolean>>();
+
 export async function bootstrapTabScan(
   tab: chrome.tabs.Tab,
   openPanelPromise?: Promise<void>,
@@ -32,24 +34,7 @@ export async function bootstrapTabScan(
     return;
   }
 
-  void refererRuleManager.setActiveTabContext(url);
-
-  const existingSession = sessionStore.getSession(tabId);
-  let sessionEpoch: number;
-
-  if (!existingSession || existingSession.pageUrl !== url) {
-    const session = sessionStore.resetSessionForNewPage(tabId, url, 'scanning', title);
-    sessionEpoch = session.scanEpoch;
-  } else {
-    if (title) {
-      sessionStore.updatePageTitle(tabId, title);
-    }
-    existingSession.scanEpoch += 1;
-    sessionStore.setScanStatus(tabId, 'scanning');
-    sessionEpoch = existingSession.scanEpoch;
-  }
-
-  await injectAndStartScanner(tabId, sessionEpoch);
+  await startTabScan(tabId, url, title);
 }
 
 export async function triggerTabRescan(tabId: number): Promise<boolean> {
@@ -66,18 +51,16 @@ export async function triggerTabRescan(tabId: number): Promise<boolean> {
     console.warn('[WIC] Failed to get tab info for tabId:', tabId, err);
   }
 
-  let session = sessionStore.getSession(tabId);
-  if (!session) {
-    session = sessionStore.getOrCreateSession(tabId, currentUrl, currentTitle);
-  } else if (currentUrl && (!session.pageUrl || session.pageUrl !== currentUrl)) {
-    session = sessionStore.resetSessionForNewPage(tabId, currentUrl, 'scanning', currentTitle);
-  } else if (currentTitle) {
-    sessionStore.updatePageTitle(tabId, currentTitle);
-  }
-
-  const urlToCheck = currentUrl || session.pageUrl || '';
+  const session = sessionStore.getSession(tabId);
+  const urlToCheck = currentUrl || session?.pageUrl || '';
   if (!isScannableUrl(urlToCheck)) {
     void refererRuleManager.setActiveTabContext(undefined);
+    if (session && currentUrl && session.pageUrl !== currentUrl) {
+      sessionStore.resetSessionForNewPage(tabId, currentUrl, 'restricted', currentTitle);
+    } else {
+      sessionStore.getOrCreateSession(tabId, currentUrl, currentTitle);
+      if (currentTitle) sessionStore.updatePageTitle(tabId, currentTitle);
+    }
     const protocolHint = urlToCheck ? `${urlToCheck.slice(0, 30)}...` : '内部ページ';
     sessionStore.setScanStatus(
       tabId,
@@ -87,16 +70,62 @@ export async function triggerTabRescan(tabId: number): Promise<boolean> {
     return false;
   }
 
-  void refererRuleManager.setActiveTabContext(urlToCheck);
-  session.scanEpoch += 1;
-  sessionStore.setScanStatus(tabId, 'scanning');
-  return injectAndStartScanner(tabId, session.scanEpoch);
+  return startTabScan(tabId, urlToCheck, currentTitle);
+}
+
+function startTabScan(tabId: number, pageUrl: string, pageTitle?: string): Promise<boolean> {
+  const session = sessionStore.getSession(tabId);
+  const pending = pendingScanStarts.get(tabId);
+  if (pending) {
+    if (session?.pageUrl === pageUrl && session.scanStatus !== 'stale' && session.scanStatus !== 'restricted') {
+      return pending;
+    }
+    // The previous document may still be finishing injection. Check the URL again after it settles.
+    return pending.then(async () => {
+      const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+      return tab?.url === pageUrl ? startTabScan(tabId, pageUrl, tab.title) : false;
+    });
+  }
+
+  void refererRuleManager.setActiveTabContext(pageUrl);
+  let scanEpoch: number;
+  if (session?.pageUrl === pageUrl) {
+    if (pageTitle) sessionStore.updatePageTitle(tabId, pageTitle);
+    scanEpoch = session.scanEpoch + 1;
+    sessionStore.setScanStatus(tabId, 'scanning', undefined, scanEpoch);
+  } else {
+    scanEpoch = sessionStore.resetSessionForNewPage(tabId, pageUrl, 'scanning', pageTitle).scanEpoch;
+  }
+
+  const start = injectAndStartScanner(tabId, scanEpoch).finally(() => pendingScanStarts.delete(tabId));
+  pendingScanStarts.set(tabId, start);
+  return start;
 }
 
 async function injectAndStartScanner(
   tabId: number,
   scanEpoch: number,
 ): Promise<boolean> {
+  const isCurrentScan = () => {
+    const session = sessionStore.getSession(tabId);
+    return session?.scanEpoch === scanEpoch && session.scanStatus !== 'stale' && session.scanStatus !== 'restricted';
+  };
+
+  const startScanner = async () => {
+    if (!isCurrentScan()) return false;
+    const response = (await chrome.tabs.sendMessage(tabId, {
+      channel: 'WIC_BG_TO_CONTENT',
+      type: 'BG_START_OR_RESCAN',
+      scanEpoch,
+    })) as MessageResult | undefined;
+    if (!response?.ok) throw new Error(response?.error ?? 'Scanner did not acknowledge the start request');
+    if (!isCurrentScan()) return false;
+
+    sessionStore.announceSnapshot(tabId);
+    void chrome.runtime.sendMessage({ type: 'HOIHOI_SCANNER_READY', tabId }).catch(() => {});
+    return true;
+  };
+
   // 1. Try pinging existing content script first
   try {
     const pingRes = (await chrome.tabs.sendMessage(tabId, {
@@ -104,35 +133,22 @@ async function injectAndStartScanner(
       type: 'BG_PING_CONTENT',
     })) as MessageResult;
 
-    if (pingRes?.ok) {
-      await chrome.tabs.sendMessage(tabId, {
-        channel: 'WIC_BG_TO_CONTENT',
-        type: 'BG_START_OR_RESCAN',
-        scanEpoch,
-      });
-      void chrome.runtime.sendMessage({ type: 'HOIHOI_SCANNER_READY', tabId }).catch(() => {});
-      return true;
-    }
+    if (pingRes?.ok) return await startScanner();
   } catch {
     // Content script not yet present or context invalidated
   }
 
   // 2. Inject content script via chrome.scripting
+  if (!isCurrentScan()) return false;
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
       files: [CONTENT_SCANNER_SCRIPT_PATH],
     });
 
-    await chrome.tabs.sendMessage(tabId, {
-      channel: 'WIC_BG_TO_CONTENT',
-      type: 'BG_START_OR_RESCAN',
-      scanEpoch,
-    });
-    sessionStore.announceSnapshot(tabId);
-    void chrome.runtime.sendMessage({ type: 'HOIHOI_SCANNER_READY', tabId }).catch(() => {});
-    return true;
+    return await startScanner();
   } catch (err) {
+    if (!isCurrentScan()) return false;
     console.warn('[WIC] Injection failed (activeTab may have expired):', err);
     sessionStore.setScanStatus(
       tabId,
