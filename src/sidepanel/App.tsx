@@ -54,8 +54,10 @@ export function App() {
   } = useTabSession(activeTabId);
 
   const isPanelVisible = usePanelActivity(activeTabId, snapshot);
-  const rawItems = snapshot?.items ?? EMPTY_IMAGES;
-  const rawVideos = snapshot?.videos ?? EMPTY_VIDEOS;
+  const scanStatus = snapshot?.scanStatus ?? 'unscanned';
+  const isGlobalBlockedStatus = scanStatus === 'unscanned' || scanStatus === 'restricted' || scanStatus === 'stale';
+  const rawItems = isGlobalBlockedStatus ? EMPTY_IMAGES : snapshot?.items ?? EMPTY_IMAGES;
+  const rawVideos = isGlobalBlockedStatus ? EMPTY_VIDEOS : snapshot?.videos ?? EMPTY_VIDEOS;
   const downloads = snapshot?.downloads ?? EMPTY_DOWNLOADS;
 
   const {
@@ -77,9 +79,17 @@ export function App() {
 
   const imageSortSelection = imagePrefs.sortOrder === 'selected_first' ? selectedImageIds : undefined;
   const videoSortSelection = videoPrefs.sortOrder === 'selected_first' ? selectedVideoIds : undefined;
-  const { filteredItems, unknownDimensionsCount } = useMemo(
+  const { filteredItems, unknownDimensionIds } = useMemo(
     () => getImageView(rawItems, imagePrefs.filter, imagePrefs.sortOrder, imageSortSelection),
     [rawItems, imagePrefs.filter, imagePrefs.sortOrder, imageSortSelection],
+  );
+  const canSelectImage = useCallback(
+    (item: ImageItem) => !unknownDimensionIds.has(item.itemId),
+    [unknownDimensionIds],
+  );
+  const selectableImages = useMemo(
+    () => unknownDimensionIds.size > 0 ? filteredItems.filter(canSelectImage) : filteredItems,
+    [filteredItems, canSelectImage, unknownDimensionIds],
   );
   const { filteredVideos, unknownVideoMetadataCount } = useMemo(
     () => getVideoView(rawVideos, videoPrefs.filter, videoPrefs.sortOrder, videoSortSelection),
@@ -96,7 +106,7 @@ export function App() {
   const imageSelection = useMediaSelection({
     ...selectionActions,
     mode: 'image',
-    items: filteredItems,
+    items: selectableImages,
     selectedIds: selectedImageIds,
   });
   const videoSelection = useMediaSelection({
@@ -157,9 +167,6 @@ export function App() {
     [cancelDownload],
   );
 
-  const scanStatus = snapshot?.scanStatus || 'unscanned';
-  const isGlobalBlockedStatus = scanStatus === 'unscanned' || scanStatus === 'restricted';
-
   const showImageEmptyView = isGlobalBlockedStatus || filteredItems.length === 0;
   const showVideoEmptyView = isGlobalBlockedStatus || filteredVideos.length === 0;
 
@@ -199,7 +206,7 @@ export function App() {
           onChangeMode={setMediaMode}
           imageCount={rawItems.length}
           videoCount={rawVideos.length}
-          selectedImageCount={selectedImageIds.size}
+          selectedImageCount={imageSelection.visibleSelectedCount}
           selectedVideoCount={selectedVideoIds.size}
         />
       )}
@@ -215,14 +222,15 @@ export function App() {
                 sortOrder={imagePrefs.sortOrder}
                 onSortChange={imagePrefs.setSortOrder}
                 onReset={imagePrefs.resetFilter}
-                unknownDimensionsCount={unknownDimensionsCount}
+                unknownDimensionsCount={unknownDimensionIds.size}
               />
 
               <SelectionToolbar
                 mediaMode="image"
-                selectedCount={selectedImageIds.size}
+                selectedCount={imageSelection.visibleSelectedCount}
                 hiddenSelectedCount={imageSelection.hiddenSelectedCount}
                 visibleCount={filteredItems.length}
+                selectableVisibleCount={imageSelection.selectableCount}
                 visibleSelectedCount={imageSelection.visibleSelectedCount}
                 hasVariants={hasImageVariants}
                 cardSize={imagePrefs.cardSize}
@@ -230,9 +238,9 @@ export function App() {
                 onSelectVisible={imageSelection.onSelectVisible}
                 onDeselectVisible={imageSelection.onDeselectVisible}
                 onClearAll={() => void clearAllSelection('image')}
-                onDownloadSelected={() => void enqueueDownloads(Array.from(selectedImageIds))}
+                onDownloadSelected={() => void enqueueDownloads(imageSelection.visibleSelectedIds)}
                 onApplyVariantPreference={(target) =>
-                  void batchSelectVariants(target, imageSelection.visibleIds, 'image')
+                  void batchSelectVariants(target, filteredItems.map((item) => item.itemId), 'image')
                 }
               />
             </>
@@ -251,6 +259,7 @@ export function App() {
             <ImageGrid
               items={filteredItems}
               selectedIds={selectedImageIds}
+              isSelectable={canSelectImage}
               downloads={downloads}
               cardSize={imagePrefs.cardSize}
               onToggleSelect={imageSelection.onToggle}
@@ -348,9 +357,10 @@ export function App() {
             const next = filteredItems[index];
             if (next) setPreviewItemId(next.itemId);
           }}
-          onToggleSelect={(id) => void toggleSelection(id, 'image')}
+          onToggleSelect={canSelectImage(previewItem) ? (id) => void toggleSelection(id, 'image') : undefined}
           onDownload={(itemId) => void enqueueDownloads([itemId])}
           onSelectVariant={selectVariant}
+          onReportDimensions={reportThumbDimensions}
         />
       )}
 

@@ -73,6 +73,7 @@ export function useMediaSelection<T extends MediaEntry>({
   return {
     visibleIds,
     selectableCount: selectableIds.length,
+    visibleSelectedIds,
     visibleSelectedCount: visibleSelectedIds.length,
     hiddenSelectedCount: selectedIds.size - visibleSelectedIds.length,
     onSelectVisible: () => selectAllVisible(selectableIds, mode),

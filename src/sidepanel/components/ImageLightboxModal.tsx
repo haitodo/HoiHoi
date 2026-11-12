@@ -8,9 +8,10 @@ interface ImageLightboxModalProps {
   downloadState?: ItemDownloadState;
   onClose: () => void;
   onNavigate: (index: number) => void;
-  onToggleSelect: (itemId: string) => void;
+  onToggleSelect?: (itemId: string) => void;
   onDownload: (itemId: string) => void;
   onSelectVariant: (itemId: string, variantUrl: string) => void;
+  onReportDimensions: (itemId: string, variantUrl: string, width: number, height: number) => void;
 }
 
 export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
@@ -23,6 +24,7 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
   onToggleSelect,
   onDownload,
   onSelectVariant,
+  onReportDimensions,
 }) => {
   const [copied, setCopied] = useState(false);
   const currentItem = items[currentIndex];
@@ -39,11 +41,9 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
         if (hasPrev) onNavigate(currentIndex - 1);
       } else if (e.key === 'ArrowRight') {
         if (hasNext) onNavigate(currentIndex + 1);
-      } else if (e.key === ' ' || e.code === 'Space') {
+      } else if (currentItem && onToggleSelect && (e.key === ' ' || e.code === 'Space')) {
         e.preventDefault();
-        if (currentItem) {
-          onToggleSelect(currentItem.itemId);
-        }
+        onToggleSelect(currentItem.itemId);
       }
     };
 
@@ -57,6 +57,7 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
     currentItem.variants.find((v) => v.url === currentItem.selectedUrl) ||
     currentItem.variants[0];
   const selectedUrl = currentItem.selectedUrl;
+  const checked = Boolean(onToggleSelect && isSelected);
 
   const dimsText =
     activeVariant?.naturalWidth && activeVariant?.naturalHeight
@@ -201,6 +202,12 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
           <img
             src={selectedUrl}
             alt="Preview"
+            onLoad={(event) => {
+              const { naturalWidth, naturalHeight } = event.currentTarget;
+              if (naturalWidth > 0 && naturalHeight > 0 && (!activeVariant?.naturalWidth || !activeVariant?.naturalHeight)) {
+                onReportDimensions(currentItem.itemId, selectedUrl, naturalWidth, naturalHeight);
+              }
+            }}
             style={{
               maxWidth: '94%',
               maxHeight: 'calc(100vh - 180px)',
@@ -274,19 +281,20 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              cursor: 'pointer',
+              cursor: onToggleSelect ? 'pointer' : 'default',
               fontSize: 12,
               fontWeight: 600,
-              color: isSelected ? 'var(--color-primary-text)' : '#ffffff',
+              color: checked ? 'var(--color-primary-text)' : '#ffffff',
             }}
           >
             <input
               type="checkbox"
-              checked={isSelected}
-              onChange={() => onToggleSelect(currentItem.itemId)}
-              style={{ width: 16, height: 16, cursor: 'pointer' }}
+              checked={checked}
+              disabled={!onToggleSelect}
+              onChange={() => onToggleSelect?.(currentItem.itemId)}
+              style={{ width: 16, height: 16 }}
             />
-            <span>{isSelected ? '✓ 選択中' : '選択する (Space)'}</span>
+            <span>{checked ? '✓ 選択中' : onToggleSelect ? '選択する (Space)' : '寸法の確認が必要です'}</span>
           </label>
 
           {/* Action Buttons */}

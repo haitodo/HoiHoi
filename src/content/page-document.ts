@@ -1,5 +1,5 @@
 import { LAZY_SRC_ATTR_ALLOWLIST, MAX_ITEMS_PER_TAB } from '@shared/constants';
-import { isSupportedAlbumUrl } from '@shared/album-utils';
+import { getXasiatAlbumImageSelector, isSupportedAlbumUrl } from '@shared/album-utils';
 import type { PaginationLink } from '@shared/pagination-utils';
 import { isLikelyImageLinkHref, resolveAndValidateImageUrl } from '@shared/url-utils';
 import type { RawCandidateGroup } from '@shared/types';
@@ -33,15 +33,15 @@ export function parseCollectionDocument(doc: Document, url: string, ctx: Extract
     try { baseUri = new URL(rawBase, url).href; } catch { /* Fall back to the source document URL. */ }
   }
   ctx = { ...ctx, baseUri };
-  const album = isSupportedAlbumUrl(url);
-  const root = album ? doc : doc.querySelector('main, [role="main"]') ?? doc.body;
-  const selector = album ? 'img.album-photo' : [
+  const albumSelector = getXasiatAlbumImageSelector(url) ?? (isSupportedAlbumUrl(url) ? 'img.album-photo' : undefined);
+  const root = albumSelector ? doc : doc.querySelector('main, [role="main"]') ?? doc.body;
+  const selector = albumSelector ?? [
     'img', 'svg image', 'a[href]', '[style]', ...LAZY_SRC_ATTR_ALLOWLIST.map((attribute) => `[${attribute}]`),
   ].join(',');
   const groups: RawCandidateGroup[] = [];
   for (const element of root.querySelectorAll(selector)) {
     if (groups.length >= MAX_ITEMS_PER_TAB) break;
-    if (!album && (element.closest('nav, aside, footer, form, [role="navigation"], [role="complementary"], .related, .recommendations') ||
+    if (!albumSelector && (element.closest('nav, aside, footer, form, [role="navigation"], [role="complementary"], .related, .recommendations') ||
       (element.closest('header') && !element.closest('article')))) continue;
     let extracted: RawCandidateGroup[] = [];
     const tag = element.tagName.toLowerCase();

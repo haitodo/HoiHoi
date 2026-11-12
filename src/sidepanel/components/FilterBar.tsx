@@ -83,6 +83,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           </span>
           <input
             type="number"
+            aria-label="最小幅"
             min="0"
             step="10"
             placeholder="px"
@@ -111,6 +112,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           </span>
           <input
             type="number"
+            aria-label="最小高"
             min="0"
             step="10"
             placeholder="px"
@@ -237,7 +239,10 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           }}
         >
           <span>寸法不明のため判定できない画像: {unknownDimensionsCount}件</span>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+          <label
+            style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+            title="寸法不明の画像を確認できます。選択するには「寸法取得」でサイズを確認してください"
+          >
             <input
               type="checkbox"
               checked={filter.includeUnknownDimensions}
@@ -245,7 +250,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 onChange({ ...filter, includeUnknownDimensions: e.target.checked })
               }
             />
-            <span>表示する</span>
+            <span>確認用に表示</span>
           </label>
         </div>
       )}

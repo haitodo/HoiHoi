@@ -80,9 +80,11 @@ export function getImageView(
   selectedIds?: ReadonlySet<string>,
 ) {
   const query = filter.urlQuery.trim().toLowerCase();
-  const hasDimensionFilter = (filter.minWidth ?? 0) > 0 || (filter.minHeight ?? 0) > 0;
+  const minWidth = filter.minWidth ?? 0;
+  const minHeight = filter.minHeight ?? 0;
+  const hasDimensionFilter = minWidth > 0 || minHeight > 0;
   const hasFormatFilter = filter.formats.length > 0;
-  let unknownDimensionsCount = 0;
+  const unknownDimensionIds = new Set<string>();
 
   const matched = items.filter((item) => {
     if (query && !item.selectedUrl.toLowerCase().includes(query)) return false;
@@ -91,21 +93,23 @@ export function getImageView(
     if (hasFormatFilter && !filter.formats.includes(variant?.format ?? 'unknown')) return false;
     if (!hasDimensionFilter) return true;
 
-    const width = variant?.naturalWidth;
-    const height = variant?.naturalHeight;
-    if (width == null || height == null) {
-      unknownDimensionsCount++;
+    const width = variant?.naturalWidth ?? 0;
+    const height = variant?.naturalHeight ?? 0;
+    if ((width > 0 && width < minWidth) || (height > 0 && height < minHeight)) return false;
+    if ((minWidth > 0 && width <= 0) || (minHeight > 0 && height <= 0)) {
+      unknownDimensionIds.add(item.itemId);
       return filter.includeUnknownDimensions;
     }
-    if (filter.minWidth && width < filter.minWidth) return false;
-    if (filter.minHeight && height < filter.minHeight) return false;
     return true;
   });
 
+  const matchingSelection = selectedIds && unknownDimensionIds.size > 0
+    ? new Set([...selectedIds].filter((id) => !unknownDimensionIds.has(id)))
+    : selectedIds;
   const filteredItems = order === 'size_asc' || order === 'size_desc'
     ? sortByNumber(matched, getImageArea, order === 'size_desc')
-    : sortByCommonOrder(matched, order, selectedIds);
-  return { filteredItems, unknownDimensionsCount };
+    : sortByCommonOrder(matched, order, matchingSelection);
+  return { filteredItems, unknownDimensionIds };
 }
 
 function getVideoArea(video: VideoItem): number | null {

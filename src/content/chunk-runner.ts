@@ -9,6 +9,7 @@ import {
   MAX_VARIANTS_PER_ITEM,
   INLINE_DATA_URL_SESSION_MAX_CHARS,
 } from '@shared/constants';
+import { getXasiatAlbumImageSelector } from '@shared/album-utils';
 import type { ContentToBackgroundMessage } from '@shared/messages';
 import type { RawCandidateGroup, RawVideoCandidateGroup } from '@shared/types';
 import {
@@ -122,6 +123,7 @@ export function createChunkRunner(options: {
 
   let isDestroyed = false;
   let currentScanEpoch = 0;
+  let albumImageSelector: string | undefined;
   let elementCounter = 0;
   let domOrderCounter = 0;
   const elementIdMap = new WeakMap<Element, number>();
@@ -387,6 +389,7 @@ export function createChunkRunner(options: {
 
   function processElement(el: Element) {
     if (el instanceof HTMLImageElement) {
+      if (albumImageSelector && !el.matches(albumImageSelector)) return;
       const group = extractFromImageElement(el, extractorContext);
       if (group) enqueueGroup(group);
       return;
@@ -400,7 +403,7 @@ export function createChunkRunner(options: {
         getSingleVideoPageFallback(),
       );
       if (videoGroup) enqueueVideoGroup(videoGroup);
-      if (posterImageGroup) enqueueGroup(posterImageGroup);
+      if (posterImageGroup && !albumImageSelector) enqueueGroup(posterImageGroup);
       return;
     }
 
@@ -413,12 +416,13 @@ export function createChunkRunner(options: {
           getSingleVideoPageFallback(),
         );
         if (videoGroup) enqueueVideoGroup(videoGroup);
-        if (posterImageGroup) enqueueGroup(posterImageGroup);
+        if (posterImageGroup && !albumImageSelector) enqueueGroup(posterImageGroup);
       }
       return;
     }
 
     if (el instanceof SVGImageElement) {
+      if (albumImageSelector) return;
       const group = extractFromSvgImage(el, extractorContext);
       if (group) enqueueGroup(group);
       return;
@@ -429,6 +433,8 @@ export function createChunkRunner(options: {
     if (videoLinkGroup) {
       enqueueVideoGroup(videoLinkGroup);
     }
+
+    if (albumImageSelector) return;
 
     // Lazy image attributes on non-img elements
     const lazyGroup = extractFromLazyAttributes(el, extractorContext);
@@ -653,6 +659,7 @@ export function createChunkRunner(options: {
 
       // Resume from destroyed state if requested
       isDestroyed = false;
+      albumImageSelector = getXasiatAlbumImageSelector(window.location.href);
       ensureObserving();
 
       currentScanEpoch = scanEpoch;

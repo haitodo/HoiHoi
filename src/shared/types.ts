@@ -328,8 +328,8 @@ export interface FilterState {
   /** Selected formats (`empty array` = all formats shown; `'unknown'` is selectable per MVP-12). */
   formats: ImageFormat[];
   /**
-   * When `minWidth` or `minHeight` is active, controls whether items with unknown (`null`) dimensions
-   * remain visible (`spec.md` MVP-11). UI must always show count of excluded unknown-dimension items.
+   * Show images whose size cannot yet be compared with the active minimums.
+   * They become selectable when the required dimensions are known and meet the filter.
    */
   includeUnknownDimensions: boolean;
 }

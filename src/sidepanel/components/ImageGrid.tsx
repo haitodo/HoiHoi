@@ -6,6 +6,7 @@ import { ImageCard } from './ImageCard';
 interface ImageGridProps {
   items: ImageItem[];
   selectedIds: Set<string>;
+  isSelectable: (item: ImageItem) => boolean;
   downloads: Record<string, ItemDownloadState>;
   cardSize?: CardSize;
   onToggleSelect: (itemId: string, e: React.MouseEvent) => void;
@@ -55,6 +56,7 @@ function calculateColumns(containerWidth: number, size: CardSize): number {
 export const ImageGrid: React.FC<ImageGridProps> = ({
   items,
   selectedIds,
+  isSelectable,
   downloads,
   cardSize = 'auto',
   onToggleSelect,
@@ -153,6 +155,7 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
                   key={item.itemId}
                   item={item}
                   isSelected={selectedIds.has(item.itemId)}
+                  canSelect={isSelectable(item)}
                   downloadState={downloads[item.itemId]}
                   cardSize={cardSize}
                   thumbnailHeight={THUMBNAIL_HEIGHTS[cardSize]}

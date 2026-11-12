@@ -36,6 +36,7 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
 }) => {
   const effectiveSelectableCount = selectableVisibleCount ?? visibleCount;
   const mediaNoun = mediaMode === 'video' ? '動画' : '画像';
+  const hasSelection = selectedCount > 0 || hiddenSelectedCount > 0;
   return (
     <div
       style={{
@@ -58,7 +59,7 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
           </span>
           {hiddenSelectedCount > 0 && (
             <span style={{ color: 'var(--color-warning-text)', fontSize: 11 }}>
-              (非表示 {hiddenSelectedCount}件)
+              ({mediaMode === 'image' ? '条件外' : '非表示'} {hiddenSelectedCount}件)
             </span>
           )}
         </div>
@@ -210,7 +211,7 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
         <button
           type="button"
           onClick={onClearAll}
-          disabled={selectedCount === 0}
+          disabled={!hasSelection}
           style={{
             padding: '3px 8px',
             fontSize: 11,
@@ -218,9 +219,9 @@ export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
             borderRadius: 4,
             backgroundColor: 'var(--color-bg-subtle)',
             color: 'var(--color-text-primary)',
-            cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
+            cursor: hasSelection ? 'pointer' : 'not-allowed',
           }}
-          title="すべての選択を解除します（非表示中の選択も含む）"
+          title="条件外も含め、すべての選択を解除します"
         >
           全解除
         </button>

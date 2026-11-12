@@ -11,6 +11,8 @@ const panel = vi.hoisted(() => ({
   toggleSelection: vi.fn(),
   selectAllVisible: vi.fn(),
   deselectVisible: vi.fn(),
+  clearAllSelection: vi.fn(),
+  enqueueDownloads: vi.fn(),
 }));
 
 vi.mock('../hooks/useActiveTabId', () => ({
@@ -29,13 +31,13 @@ vi.mock('@tanstack/react-virtual', () => ({
   }),
 }));
 
-function image(order: number, name: string, width: number | null): ImageItem {
+function image(order: number, name: string, width: number | null, height = width): ImageItem {
   const url = `https://example.com/${name}.jpg`;
   return {
     itemId: `item_${order}`,
     primaryUrl: url,
     selectedUrl: url,
-    variants: [{ url, roles: ['src'], descriptors: [], format: 'jpeg', naturalWidth: width, naturalHeight: width }],
+    variants: [{ url, roles: ['src'], descriptors: [], format: 'jpeg', naturalWidth: width, naturalHeight: height }],
     sources: ['img'],
     occurrenceCount: 1,
     firstSeenOrder: order,
@@ -121,21 +123,26 @@ describe('side panel media views', () => {
     expect(panel.triggerRescan).toHaveBeenCalledOnce();
   });
 
-  it('loads saved image filters, keeps hidden selections, and only clears the visible selection', () => {
+  it('applies saved width filters to the list, selection, and batch download', () => {
     localStorage.setItem('wic_filter_preferences', JSON.stringify({
       minWidth: 600, minHeight: null, formats: ['jpeg'], includeUnknownDimensions: false,
       urlQuery: 'a previous search',
     }));
     localStorage.setItem('wic_sort_order', 'filename_asc');
-    const images = [image(1, 'small', 300), image(2, 'frame10', 800), image(3, 'frame1', null), image(4, 'frame2', 800)];
-    render({ items: images, selectedIds: ['item_1', 'item_2'] });
+    const images = [
+      image(1, 'small', 300, null), image(2, 'frame10', 800, null), image(3, 'frame1', null), image(4, 'frame2', 800),
+    ];
+    render({ items: images, selectedIds: ['item_1', 'item_2', 'item_3'] });
 
     const visibleImages = () => [...container.querySelectorAll<HTMLImageElement>('img[src^="https://example.com/"]')]
       .map((img) => img.src);
     expect(visibleImages()).toEqual([images[3]!.selectedUrl, images[1]!.selectedUrl]);
-    expect(container.textContent).toContain('非表示 1件');
+    expect(container.textContent).toContain('選択中: 1 件');
+    expect(container.textContent).toContain('条件外 2件');
     expect(container.textContent).toContain('寸法不明のため判定できない画像: 1件');
 
+    clickButton('ダウンロード (1)');
+    expect(panel.enqueueDownloads).toHaveBeenCalledWith(['item_2']);
     clickButton('表示中を解除');
     expect(panel.deselectVisible).toHaveBeenCalledWith(['item_2'], 'image');
 
@@ -144,6 +151,29 @@ describe('side panel media views', () => {
     expect(JSON.parse(localStorage.getItem('wic_filter_preferences')!)).toEqual({
       minWidth: 600, minHeight: null, formats: ['jpeg'], includeUnknownDimensions: true,
     });
+    const unknown = container.querySelector<HTMLInputElement>('input[aria-label="ダウンロード対象として選択"]')!;
+    expect(unknown.disabled).toBe(true);
+    expect(unknown.checked).toBe(false);
+    clickButton('表示中を全選択 (2件)');
+    expect(panel.selectAllVisible).toHaveBeenCalledWith(['item_4', 'item_2'], 'image');
+
+    const minimum = container.querySelector<HTMLInputElement>('input[aria-label="最小幅"]')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(minimum, '900');
+      minimum.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(visibleImages()).toEqual([images[2]!.selectedUrl]);
+    clickButton('ダウンロード (0)');
+    expect(panel.enqueueDownloads).toHaveBeenCalledOnce();
+    clickButton('全解除');
+    expect(panel.clearAllSelection).toHaveBeenCalledWith('image');
+  });
+
+  it('hides the previous page’s images and selection when the tab navigates', () => {
+    render({ scanStatus: 'stale', items: [image(1, 'previous-page', 800)], selectedIds: ['item_1'] });
+    expect(container.querySelector('img[src="https://example.com/previous-page.jpg"]')).toBeNull();
+    expect(container.textContent).not.toContain('選択中:');
+    expect(container.textContent).toContain('再スキャンを試行');
   });
 
   it('keeps the video duration boundaries and sorts resolution hints before unknown values', () => {

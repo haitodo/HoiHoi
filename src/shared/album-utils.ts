@@ -7,6 +7,22 @@ export function isSupportedAlbumUrl(value?: string): boolean {
   } catch { return false; }
 }
 
+export function getXasiatAlbumImageSelector(pageUrl: string): string | undefined {
+  try {
+    const url = new URL(pageUrl);
+    if (
+      url.protocol === 'https:' &&
+      ['xasiat.com', 'www.xasiat.com'].includes(url.hostname) &&
+      /^\/albums\/\d+(?:\/[^/]+)?\/?$/.test(url.pathname) &&
+      !url.username && !url.password
+    ) {
+      return '.block-album .album-holder .images > a.item > img';
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 export function normalizeAlbumPageUrl(value: string, albumUrl: string): string | null {
   if (!isSupportedAlbumUrl(albumUrl)) return null;
   try {

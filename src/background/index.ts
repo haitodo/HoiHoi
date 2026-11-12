@@ -124,7 +124,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
         await sessionStore.ensureHydrated();
 
         const session = sessionStore.getSession(tabId);
-        if (!session || message.scanEpoch !== session.scanEpoch) {
+        if (!session || session.scanStatus === 'stale' || session.scanStatus === 'restricted' || message.scanEpoch !== session.scanEpoch) {
           sendResponse({ ok: true });
           return;
         }

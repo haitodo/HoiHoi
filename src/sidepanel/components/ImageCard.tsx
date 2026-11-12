@@ -4,6 +4,7 @@ import type { CardSize, ImageItem, ItemDownloadState } from '@shared/types';
 interface ImageCardProps {
   item: ImageItem;
   isSelected: boolean;
+  canSelect: boolean;
   downloadState?: ItemDownloadState;
   thumbnailHeight?: number;
   cardSize?: CardSize;
@@ -17,6 +18,7 @@ interface ImageCardProps {
 export const ImageCard: React.FC<ImageCardProps> = ({
   item,
   isSelected,
+  canSelect,
   downloadState,
   thumbnailHeight = 120,
   cardSize = 'medium',
@@ -69,16 +71,17 @@ export const ImageCard: React.FC<ImageCardProps> = ({
       : '寸法不明';
 
   const formatText = activeVariant?.format.toUpperCase() || 'UNKNOWN';
+  const checked = canSelect && isSelected;
 
   return (
     <div
-      onClick={(e) => onToggleSelect(e)}
+      onClick={canSelect ? onToggleSelect : undefined}
       onDoubleClick={(e) => {
         e.stopPropagation();
         onOpenPreview?.();
       }}
       style={{
-        border: `2px solid ${isSelected ? 'var(--color-primary)' : 'var(--color-border)'}`,
+        border: `2px solid ${checked ? 'var(--color-primary)' : 'var(--color-border)'}`,
         borderRadius: 8,
         backgroundColor: 'var(--color-card-bg)',
         overflow: 'hidden',
@@ -86,7 +89,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         flexDirection: 'column',
         height: '100%',
         boxSizing: 'border-box',
-        cursor: 'pointer',
+        cursor: canSelect ? 'pointer' : 'default',
         position: 'relative',
         transition: 'border-color 0.15s ease',
       }}
@@ -108,14 +111,17 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         }}
         onClick={(e) => {
           e.stopPropagation();
-          onToggleSelect(e);
+          if (canSelect) onToggleSelect(e);
         }}
+        title={canSelect ? undefined : '「寸法取得」でサイズを確認すると選択できます'}
       >
         <input
           type="checkbox"
-          checked={isSelected}
+          aria-label="ダウンロード対象として選択"
+          checked={checked}
+          disabled={!canSelect}
           onChange={() => {}}
-          style={{ cursor: 'pointer', margin: 0 }}
+          style={{ cursor: canSelect ? 'pointer' : 'default', margin: 0 }}
         />
       </div>
 

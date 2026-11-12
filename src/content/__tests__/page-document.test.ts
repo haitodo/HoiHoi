@@ -48,6 +48,19 @@ describe('collection from real HTML structures', () => {
       <img src="https://cdn.v2ph.com/album/related.jpg">`, 'https://www.v2ph.com/album/example.html?hl=ja');
     expect(page.groups.map((group) => group.primaryUrl)).toEqual(['https://cdn.v2ph.com/photos/1.jpg']);
   });
+  it('collects the Xasiat album photos with their full-size links', () => {
+    const url = 'https://www.xasiat.com/albums/12345/example/';
+    const photos = Array.from({ length: 14 }, (_, i) => `<a class="item" href="/get_image/2/example/sources/${i}.jpg/">
+      <img src="data:image/gif;base64,R0lGODlhAQAB" data-original="https://cdn.example/album/${i}.jpg" width="106" height="150">
+      </a>`);
+    const page = parse(`<div class="block-album"><div class="album-holder"><div class="images">${photos.join('')}
+      </div></div></div><div id="list_albums_related_albums_items"><img src="/related.jpg" width="380" height="507"></div>
+      <div class="logo"><img src="/logo.svg"></div>`, url);
+
+    expect(page.groups.map((group) => group.primaryUrl)).toEqual(photos.map((_, i) => `https://cdn.example/album/${i}.jpg`));
+    expect(page.groups.map((group) => group.variants.find((variant) => variant.role === 'link-target')?.url))
+      .toEqual(photos.map((_, i) => `https://www.xasiat.com/get_image/2/example/sources/${i}.jpg/`));
+  });
   it('detects head rel=next and numbered navigation but not adjacent-article links', () => {
     const page = parse(`<head><link rel="next" href="?page=2&tag=flowers"></head><body>
       <main><img src="/1.jpg"></main><div class="pagination"><a href="?page=2&tag=flowers">2</a></div>
