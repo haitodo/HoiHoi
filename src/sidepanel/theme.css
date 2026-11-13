@@ -307,6 +307,61 @@ input, select, button {
   opacity: 1;
 }
 
+/* Floating Scroll Edge Controls (Bottom-Left) */
+.scroll-edge-controls {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: var(--color-overlay-bg);
+  border: 1px solid var(--color-overlay-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(6px);
+  animation: scan-fade-in 0.15s ease;
+}
+
+.scroll-edge-btn {
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.scroll-edge-btn + .scroll-edge-btn {
+  border-top: 1px solid var(--color-border);
+}
+
+.scroll-edge-btn:hover:not(:disabled) {
+  background-color: var(--color-primary-subtle);
+  color: var(--color-primary-text);
+}
+
+.scroll-edge-btn:active:not(:disabled) {
+  background-color: var(--color-primary-subtle-border);
+}
+
+.scroll-edge-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.scroll-edge-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 @keyframes spin {
   from {
     transform: rotate(0deg);

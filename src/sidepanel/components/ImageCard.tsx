@@ -217,7 +217,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
       <div
         style={{
           width: '100%',
-          height: thumbnailHeight,
+          ...(cardSize === 'large'
+            ? { minHeight: 160, maxHeight: thumbnailHeight }
+            : { height: thumbnailHeight }),
           backgroundColor: 'var(--color-thumb-bg)',
           display: 'flex',
           alignItems: 'center',
@@ -261,11 +263,25 @@ export const ImageCard: React.FC<ImageCardProps> = ({
                 onReportDimensions(previewUrl, naturalWidth, naturalHeight);
               }
             }}
-            style={{
-              maxWidth: '100%',
-              maxHeight: '100%',
-              objectFit: 'contain',
-            }}
+            style={
+              cardSize === 'large'
+                ? {
+                    width: '100%',
+                    height: 'auto',
+                    maxHeight: thumbnailHeight,
+                    objectFit: 'contain',
+                    display: 'block',
+                    ...(previewVariant?.naturalWidth && previewVariant?.naturalHeight
+                      ? { aspectRatio: `${previewVariant.naturalWidth} / ${previewVariant.naturalHeight}` }
+                      : {}),
+                  }
+                : {
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'contain',
+                    display: 'block',
+                  }
+            }
           />
         )}
       </div>

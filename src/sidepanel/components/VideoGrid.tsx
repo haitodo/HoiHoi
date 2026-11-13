@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { CardSize, ItemDownloadState, VideoItem } from '@shared/types';
 import type { HlsStreamMergeProgress } from '../utils/hls-saver';
+import { ScrollEdgeControls } from './ScrollEdgeControls';
 import { VideoCard } from './VideoCard';
 
 interface VideoGridProps {
@@ -132,92 +133,108 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
     overscan: 3,
   });
 
+  const totalSize = virtualizer.getTotalSize();
+
   return (
     <div
-      ref={containerRef}
       style={{
         flex: 1,
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        padding: '8px 10px',
+        minHeight: 0,
         position: 'relative',
-        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
       }}
     >
       <div
+        ref={containerRef}
         style={{
-          height: `${virtualizer.getTotalSize()}px`,
-          width: '100%',
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          padding: '8px 10px',
           position: 'relative',
           boxSizing: 'border-box',
         }}
       >
-        {virtualizer.getVirtualItems().map((virtualRow) => {
-          const rowVideos = rows[virtualRow.index];
-          if (!rowVideos) return null;
+        <div
+          style={{
+            height: `${totalSize}px`,
+            width: '100%',
+            position: 'relative',
+            boxSizing: 'border-box',
+          }}
+        >
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const rowVideos = rows[virtualRow.index];
+            if (!rowVideos) return null;
 
-          return (
-            <div
-              key={virtualRow.key}
-              ref={virtualizer.measureElement}
-              data-index={virtualRow.index}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                transform: `translateY(${virtualRow.start}px)`,
-                display: 'grid',
-                gridTemplateColumns: `repeat(${columnCount}, 1fr)`,
-                gap: CARD_GAP,
-                paddingBottom: CARD_GAP,
-                boxSizing: 'border-box',
-              }}
-            >
-              {rowVideos.map((video) => (
-                <VideoCard
-                  key={video.itemId}
-                  item={video}
-                  isSelected={selectedVideoIds.has(video.itemId)}
-                  isInlinePlaying={activePlayingId === video.itemId}
-                  downloadState={downloads[video.itemId]}
-                  cardSize={cardSize}
-                  thumbnailHeight={VIDEO_STAGE_HEIGHTS[cardSize]}
-                  onToggleSelect={(e) => onToggleSelect(video.itemId, e)}
-                  onToggleInlinePlay={() =>
-                    setActivePlayingId((prev) =>
-                      prev === video.itemId ? null : video.itemId,
-                    )
-                  }
-                  onSelectVariant={(variantUrl) => onSelectVariant(video.itemId, variantUrl)}
-                  onReportVideoMetadata={(variantUrl, w, h, dur) =>
-                    onReportVideoMetadata(video.itemId, variantUrl, w, h, dur)
-                  }
-                  onResolveHlsManifest={(manifestUrl) =>
-                    onResolveHlsManifest(video.itemId, manifestUrl)
-                  }
-                  onMergeHlsStream={
-                    onMergeHlsStream
-                      ? (manifestUrl, signal, onProgress) =>
-                          onMergeHlsStream(video.itemId, manifestUrl, signal, onProgress)
-                      : undefined
-                  }
-                  onDownload={() => onDownloadVideo(video.itemId)}
-                  onCancelDownload={() => onCancelDownload(video.itemId)}
-                  onOpenPreview={
-                    onOpenPreview
-                      ? () => {
-                          setActivePlayingId(null); // Stop inline player when opening modal
-                          onOpenPreview(video);
-                        }
-                      : undefined
-                  }
-                />
-              ))}
-            </div>
-          );
-        })}
+            return (
+              <div
+                key={virtualRow.key}
+                ref={virtualizer.measureElement}
+                data-index={virtualRow.index}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualRow.start}px)`,
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${columnCount}, 1fr)`,
+                  gap: CARD_GAP,
+                  paddingBottom: CARD_GAP,
+                  boxSizing: 'border-box',
+                }}
+              >
+                {rowVideos.map((video) => (
+                  <VideoCard
+                    key={video.itemId}
+                    item={video}
+                    isSelected={selectedVideoIds.has(video.itemId)}
+                    isInlinePlaying={activePlayingId === video.itemId}
+                    downloadState={downloads[video.itemId]}
+                    cardSize={cardSize}
+                    thumbnailHeight={VIDEO_STAGE_HEIGHTS[cardSize]}
+                    onToggleSelect={(e) => onToggleSelect(video.itemId, e)}
+                    onToggleInlinePlay={() =>
+                      setActivePlayingId((prev) =>
+                        prev === video.itemId ? null : video.itemId,
+                      )
+                    }
+                    onSelectVariant={(variantUrl) => onSelectVariant(video.itemId, variantUrl)}
+                    onReportVideoMetadata={(variantUrl, w, h, dur) =>
+                      onReportVideoMetadata(video.itemId, variantUrl, w, h, dur)
+                    }
+                    onResolveHlsManifest={(manifestUrl) =>
+                      onResolveHlsManifest(video.itemId, manifestUrl)
+                    }
+                    onMergeHlsStream={
+                      onMergeHlsStream
+                        ? (manifestUrl, signal, onProgress) =>
+                            onMergeHlsStream(video.itemId, manifestUrl, signal, onProgress)
+                        : undefined
+                    }
+                    onDownload={() => onDownloadVideo(video.itemId)}
+                    onCancelDownload={() => onCancelDownload(video.itemId)}
+                    onOpenPreview={
+                      onOpenPreview
+                        ? () => {
+                            setActivePlayingId(null); // Stop inline player when opening modal
+                            onOpenPreview(video);
+                          }
+                        : undefined
+                    }
+                  />
+                ))}
+              </div>
+            );
+          })}
+        </div>
       </div>
+
+      <ScrollEdgeControls scrollContainerRef={containerRef} contentHeight={totalSize} />
     </div>
   );
 };

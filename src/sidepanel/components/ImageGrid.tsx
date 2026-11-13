@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { CardSize, ImageItem, ItemDownloadState } from '@shared/types';
 import { ImageCard } from './ImageCard';
+import { ScrollEdgeControls } from './ScrollEdgeControls';
 
 interface ImageGridProps {
   items: ImageItem[];
@@ -19,14 +20,14 @@ interface ImageGridProps {
 const CARD_GAP = 10;
 
 const THUMBNAIL_HEIGHTS: Record<CardSize, number> = {
-  large: 380,
+  large: 460,
   auto: 140,
   medium: 150,
   small: 90,
 };
 
 const ESTIMATED_ROW_HEIGHTS: Record<CardSize, number> = {
-  large: 460,
+  large: 400,
   auto: 215,
   medium: 225,
   small: 145,
@@ -108,70 +109,86 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
     overscan: 3,
   });
 
+  const totalSize = virtualizer.getTotalSize();
+
   return (
     <div
-      ref={containerRef}
       style={{
         flex: 1,
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        padding: '8px 6px 8px 8px',
+        minHeight: 0,
         position: 'relative',
-        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
       }}
     >
       <div
+        ref={containerRef}
         style={{
-          height: `${virtualizer.getTotalSize()}px`,
-          width: '100%',
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          padding: '8px 6px 8px 8px',
           position: 'relative',
           boxSizing: 'border-box',
         }}
       >
-        {virtualizer.getVirtualItems().map((virtualRow) => {
-          const rowItems = rows[virtualRow.index];
-          if (!rowItems) return null;
+        <div
+          style={{
+            height: `${totalSize}px`,
+            width: '100%',
+            position: 'relative',
+            boxSizing: 'border-box',
+          }}
+        >
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const rowItems = rows[virtualRow.index];
+            if (!rowItems) return null;
 
-          return (
-            <div
-              key={virtualRow.key}
-              ref={virtualizer.measureElement}
-              data-index={virtualRow.index}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                transform: `translateY(${virtualRow.start}px)`,
-                display: 'grid',
-                gridTemplateColumns: `repeat(${columnCount}, 1fr)`,
-                gap: CARD_GAP,
-                paddingBottom: CARD_GAP,
-                boxSizing: 'border-box',
-              }}
-            >
-              {rowItems.map((item) => (
-                <ImageCard
-                  key={item.itemId}
-                  item={item}
-                  isSelected={selectedIds.has(item.itemId)}
-                  canSelect={isSelectable(item)}
-                  downloadState={downloads[item.itemId]}
-                  cardSize={cardSize}
-                  thumbnailHeight={THUMBNAIL_HEIGHTS[cardSize]}
-                  onToggleSelect={(e) => onToggleSelect(item.itemId, e)}
-                  onSelectVariant={(variantUrl) => onSelectVariant(item.itemId, variantUrl)}
-                  onReportDimensions={(variantUrl, w, h) =>
-                    onReportDimensions(item.itemId, variantUrl, w, h)
-                  }
-                  onDownload={() => onDownloadItem(item.itemId)}
-                  onOpenPreview={onOpenPreview ? () => onOpenPreview(item) : undefined}
-                />
-              ))}
-            </div>
-          );
-        })}
+            return (
+              <div
+                key={virtualRow.key}
+                ref={virtualizer.measureElement}
+                data-index={virtualRow.index}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualRow.start}px)`,
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${columnCount}, 1fr)`,
+                  gap: CARD_GAP,
+                  paddingBottom: CARD_GAP,
+                  boxSizing: 'border-box',
+                }}
+              >
+                {rowItems.map((item) => (
+                  <ImageCard
+                    key={item.itemId}
+                    item={item}
+                    isSelected={selectedIds.has(item.itemId)}
+                    canSelect={isSelectable(item)}
+                    downloadState={downloads[item.itemId]}
+                    cardSize={cardSize}
+                    thumbnailHeight={THUMBNAIL_HEIGHTS[cardSize]}
+                    onToggleSelect={(e) => onToggleSelect(item.itemId, e)}
+                    onSelectVariant={(variantUrl) => onSelectVariant(item.itemId, variantUrl)}
+                    onReportDimensions={(variantUrl, w, h) =>
+                      onReportDimensions(item.itemId, variantUrl, w, h)
+                    }
+                    onDownload={() => onDownloadItem(item.itemId)}
+                    onOpenPreview={onOpenPreview ? () => onOpenPreview(item) : undefined}
+                  />
+                ))}
+              </div>
+            );
+          })}
+        </div>
       </div>
+
+      <ScrollEdgeControls scrollContainerRef={containerRef} contentHeight={totalSize} />
     </div>
   );
 };

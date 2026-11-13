@@ -261,4 +261,67 @@ describe('side panel media views', () => {
     render({ scanEpoch: 2, items: newImages, selectedIds: [] });
     expect(panel.selectAllVisible).not.toHaveBeenCalled();
   });
+
+  it('shows bottom-left scroll edge controls in both image and video grids when scrollable', () => {
+    const images = Array.from({ length: 10 }, (_, idx) => image(idx + 1, `img${idx + 1}`, 800));
+    const videos = Array.from({ length: 10 }, (_, idx) => video(idx + 1, `vid${idx + 1}.mp4`, 30));
+    render({ items: images, videos });
+
+    const getScrollContainer = () =>
+      [...container.querySelectorAll<HTMLDivElement>('div')].find(
+        (el) => el.style.overflowY === 'auto',
+      )!;
+
+    const imageScrollEl = getScrollContainer();
+    expect(imageScrollEl).toBeDefined();
+    Object.defineProperty(imageScrollEl, 'clientHeight', { value: 400, configurable: true });
+    Object.defineProperty(imageScrollEl, 'scrollHeight', { value: 2000, configurable: true });
+    const scrollToMock = vi.fn();
+    imageScrollEl.scrollTo = scrollToMock as unknown as typeof imageScrollEl.scrollTo;
+
+    act(() => {
+      imageScrollEl.dispatchEvent(new Event('scroll'));
+    });
+
+    const bottomBtn = container.querySelector<HTMLButtonElement>('button[aria-label="一番下へ移動"]');
+    expect(bottomBtn).not.toBeNull();
+    act(() => bottomBtn!.click());
+    expect(scrollToMock).toHaveBeenCalledWith({ top: 1600, behavior: 'smooth' });
+
+    // Switch to video mode and verify VideoGrid also provides scroll edge controls
+    clickButton('動画', '[role="tab"]');
+    const videoScrollEl = getScrollContainer();
+    Object.defineProperty(videoScrollEl, 'clientHeight', { value: 400, configurable: true });
+    Object.defineProperty(videoScrollEl, 'scrollHeight', { value: 2000, configurable: true });
+    const videoScrollToMock = vi.fn();
+    videoScrollEl.scrollTo = videoScrollToMock as unknown as typeof videoScrollEl.scrollTo;
+
+    act(() => {
+      videoScrollEl.dispatchEvent(new Event('scroll'));
+    });
+
+    const videoBottomBtn = container.querySelector<HTMLButtonElement>('button[aria-label="一番下へ移動"]');
+    expect(videoBottomBtn).not.toBeNull();
+    act(() => videoBottomBtn!.click());
+    expect(videoScrollToMock).toHaveBeenCalledWith({ top: 1600, behavior: 'smooth' });
+  });
+
+  it('scales image thumbnails to card width in medium and large modes without leaving oversized empty frames', () => {
+    render({ items: [image(1, 'sample', 240, 160)] });
+
+    clickButton('中', 'button');
+    const mediumImg = container.querySelector<HTMLImageElement>('img[alt="Thumbnail"]')!;
+    expect(mediumImg.style.width).toBe('100%');
+    expect(mediumImg.style.height).toBe('100%');
+    expect(mediumImg.style.objectFit).toBe('contain');
+
+    clickButton('大', 'button');
+    const largeImg = container.querySelector<HTMLImageElement>('img[alt="Thumbnail"]')!;
+    expect(largeImg.style.width).toBe('100%');
+    expect(largeImg.style.height).toBe('auto');
+    expect(largeImg.style.maxHeight).toBe('460px');
+    expect(largeImg.style.objectFit).toBe('contain');
+    expect(largeImg.parentElement!.style.height).toBe('');
+    expect(largeImg.parentElement!.style.maxHeight).toBe('460px');
+  });
 });
