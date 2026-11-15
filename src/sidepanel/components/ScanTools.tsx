@@ -3,14 +3,22 @@ import { isCollectionPageUrl } from '@shared/pagination-utils';
 import type { TabSessionSnapshot } from '@shared/types';
 import { useScanTools } from '../hooks/useScanTools';
 
+interface UnknownDimensionsControl {
+  count: number;
+  includeUnknown: boolean;
+  onToggleIncludeUnknown: (include: boolean) => void;
+}
+
 export function ScanTools({
   snapshot,
   enabled,
   showActions = true,
+  unknownDimensions,
 }: {
   snapshot: TabSessionSnapshot | null;
   enabled: boolean;
   showActions?: boolean;
+  unknownDimensions?: UnknownDimensionsControl;
 }) {
   const available =
     enabled &&
@@ -46,7 +54,8 @@ export function ScanTools({
   }, [running, progress]);
 
   const notice = !running && showNotice && progress?.message ? progress : null;
-  if (!showActions && !running && !notice) return null;
+  const hasUnknownDimensions = Boolean(unknownDimensions && unknownDimensions.count > 0);
+  if (!showActions && !running && !notice && !hasUnknownDimensions) return null;
 
   return (
     <div className="scan-toolbar" role="region" aria-label="スキャンツールバー">
@@ -216,6 +225,29 @@ export function ScanTools({
           >
             ×
           </button>
+        </div>
+      )}
+
+      {/* 寸法不明画像の簡易確認トグル */}
+      {hasUnknownDimensions && unknownDimensions && (
+        <div className="scan-unknown-banner">
+          <span
+            className="scan-unknown-text"
+            title={`最小幅・最小高の条件に対して、寸法不明のため判定できない画像が ${unknownDimensions.count} 件あります。確認するには「確認用に表示」をONにするか「寸法取得」を実行してください`}
+          >
+            寸法不明のため判定できない画像: {unknownDimensions.count}件
+          </span>
+          <label
+            className={`scan-unknown-toggle ${unknownDimensions.includeUnknown ? 'is-active' : ''}`}
+            title="寸法不明の画像を確認できます。選択するには「寸法取得」でサイズを確認してください"
+          >
+            <input
+              type="checkbox"
+              checked={unknownDimensions.includeUnknown}
+              onChange={(e) => unknownDimensions.onToggleIncludeUnknown(e.target.checked)}
+            />
+            <span>確認用に表示</span>
+          </label>
         </div>
       )}
     </div>

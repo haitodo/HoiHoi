@@ -7,7 +7,6 @@ interface FilterBarProps {
   sortOrder: SortOrder;
   onSortChange: (order: SortOrder) => void;
   onClear?: () => void;
-  unknownDimensionsCount: number;
 }
 
 const AVAILABLE_FORMATS: Array<{ label: string; value: ImageFormat }> = [
@@ -26,7 +25,6 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   sortOrder,
   onSortChange,
   onClear,
-  unknownDimensionsCount,
 }) => {
   const toggleFormat = (fmt: ImageFormat) => {
     const isSelected = filter.formats.includes(fmt);
@@ -157,31 +155,6 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         )}
       </div>
 
-      {/* Unknown Dimension Banner (MVP-11) */}
-      {hasDimensionFilter && unknownDimensionsCount > 0 && (
-        <div className="filter-warning-banner">
-          <span>寸法不明のため判定できない画像: {unknownDimensionsCount}件</span>
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-            title="寸法不明の画像を確認できます。選択するには「寸法取得」でサイズを確認してください"
-          >
-            <input
-              type="checkbox"
-              checked={filter.includeUnknownDimensions}
-              onChange={(e) =>
-                onChange({ ...filter, includeUnknownDimensions: e.target.checked })
-              }
-            />
-            <span>確認用に表示</span>
-          </label>
-        </div>
-      )}
     </div>
   );
 };

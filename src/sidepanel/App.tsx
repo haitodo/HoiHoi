@@ -191,6 +191,16 @@ export function App() {
   const selectedCount = isImageMode ? imageSelection.visibleSelectedCount : selectedVideoIds.size;
   const hasVariants = isImageMode ? hasImageVariants : hasVideoVariants;
   const { cardSize, setCardSize } = isImageMode ? imagePrefs : videoPrefs;
+  const hasImageDimensionFilter = (imagePrefs.filter.minWidth ?? 0) > 0 || (imagePrefs.filter.minHeight ?? 0) > 0;
+  const scanUnknownDimensions =
+    hasImageDimensionFilter && unknownDimensionIds.size > 0
+      ? {
+          count: unknownDimensionIds.size,
+          includeUnknown: imagePrefs.filter.includeUnknownDimensions,
+          onToggleIncludeUnknown: (include: boolean) =>
+            imagePrefs.setFilter({ ...imagePrefs.filter, includeUnknownDimensions: include }),
+        }
+      : undefined;
 
   function applyHighestQuality() {
     const itemIds = isImageMode ? filteredItems.map((item) => item.itemId) : videoSelection.visibleIds;
@@ -244,7 +254,11 @@ export function App() {
           />
 
           {isImageMode ? (
-            <ScanTools snapshot={snapshot} enabled={isPanelVisible} showActions={optionsOpen} />
+            <ScanTools
+              snapshot={snapshot}
+              enabled={isPanelVisible}
+              unknownDimensions={scanUnknownDimensions}
+            />
           ) : isVideoProbing && (
             <VideoProbeStatus progress={videoProbeProgress} onStop={stopVideoProbing} />
           )}
@@ -257,7 +271,6 @@ export function App() {
                 sortOrder={imagePrefs.sortOrder}
                 onSortChange={imagePrefs.setSortOrder}
                 onClear={imagePrefs.clearFilter}
-                unknownDimensionsCount={unknownDimensionIds.size}
               />
             ) : (
               <VideoFilterBar

@@ -126,7 +126,7 @@ describe('side panel media views', () => {
     expect(panel.triggerRescan).toHaveBeenCalledOnce();
   });
 
-  it('keeps selection and download accessible with collapsed options and 500 px defaults on both axes', () => {
+  it('keeps selection and scan actions accessible with collapsed options and 500 px defaults on both axes', () => {
     const matching = image(1, 'matching', 500);
     const tooNarrow = image(2, 'too-narrow', 499, 800);
     const tooShort = image(3, 'too-short', 800, 499);
@@ -138,7 +138,8 @@ describe('side panel media views', () => {
       .map((img) => img.src);
     expect(optionsToggle.getAttribute('aria-expanded')).toBe('false');
     expect(options.hidden).toBe(true);
-    expect(container.querySelector('.scan-toolbar')).toBeNull();
+    expect(container.querySelector('.scan-toolbar')).not.toBeNull();
+    expect(container.querySelectorAll('.scan-action-btn')).toHaveLength(3);
     expect(thumbnails()).toEqual([matching.selectedUrl]);
 
     clickButton('表示中を全選択 (1件)');
@@ -182,14 +183,12 @@ describe('side panel media views', () => {
     expect(visibleImages()).toEqual([images[3]!.selectedUrl, images[1]!.selectedUrl]);
     expect(container.textContent).toContain('条件外 2件');
 
+    expect(container.textContent).toContain('寸法不明のため判定できない画像: 1件');
     clickButton('ダウンロード (1)');
     expect(panel.enqueueDownloads).toHaveBeenCalledWith(['item_2']);
-    clickButton('フィルター・設定');
-    expect(container.textContent).toContain('寸法不明のため判定できない画像: 1件');
-    clickButton('表示中を解除');
-    expect(panel.deselectVisible).toHaveBeenCalledWith(['item_2'], 'image');
 
-    act(() => container.querySelector<HTMLInputElement>('label input[type="checkbox"]')!.click());
+    // Unknown-dimension images can be toggled directly without opening settings.
+    act(() => container.querySelector<HTMLInputElement>('.scan-unknown-toggle input[type="checkbox"]')!.click());
     expect(visibleImages()).toEqual([images[2]!.selectedUrl, images[3]!.selectedUrl, images[1]!.selectedUrl]);
     expect(JSON.parse(localStorage.getItem('wic_filter_preferences')!)).toEqual({
       minWidth: 600, minHeight: null, formats: ['jpeg'], includeUnknownDimensions: true,
@@ -199,6 +198,11 @@ describe('side panel media views', () => {
     expect(unknown.checked).toBe(false);
     clickButton('表示中を全選択 (2件)');
     expect(panel.selectAllVisible).toHaveBeenCalledWith(['item_4', 'item_2'], 'image');
+
+    clickButton('フィルター・設定');
+    expect(container.querySelectorAll('.scan-unknown-banner')).toHaveLength(1);
+    clickButton('表示中を解除');
+    expect(panel.deselectVisible).toHaveBeenCalledWith(['item_2'], 'image');
 
     const minimum = container.querySelector<HTMLInputElement>('input[aria-label="最小幅"]')!;
     act(() => {

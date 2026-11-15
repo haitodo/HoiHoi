@@ -174,4 +174,33 @@ describe('ScanTools component', () => {
     });
     expect(mockUseScanTools.stop).toHaveBeenCalled();
   });
+
+  it('renders and toggles the inline unknown-dimensions control', () => {
+    const snapshot = createDummySnapshot();
+    const onToggleIncludeUnknown = vi.fn();
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        <ScanTools
+          snapshot={snapshot}
+          enabled={true}
+          unknownDimensions={{
+            count: 3,
+            includeUnknown: false,
+            onToggleIncludeUnknown,
+          }}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('寸法不明のため判定できない画像: 3件');
+    const checkbox = container.querySelector<HTMLInputElement>('.scan-unknown-toggle input[type="checkbox"]')!;
+    expect(checkbox).not.toBeNull();
+    expect(checkbox.checked).toBe(false);
+
+    act(() => {
+      checkbox.click();
+    });
+    expect(onToggleIncludeUnknown).toHaveBeenCalledWith(true);
+  });
 });
