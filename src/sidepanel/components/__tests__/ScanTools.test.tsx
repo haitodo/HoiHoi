@@ -148,7 +148,7 @@ describe('ScanTools component', () => {
     expect(btn0.disabled).toBe(true);
   });
 
-  it('renders running progress bar and stop button when a tool is running', () => {
+  it('keeps running progress and stop available while the scan actions are hidden', () => {
     mockUseScanTools.running = true;
     mockUseScanTools.progress = {
       tool: 'scroll',
@@ -160,10 +160,11 @@ describe('ScanTools component', () => {
     const snapshot = createDummySnapshot();
     const root = createRoot(container);
     act(() => {
-      root.render(<ScanTools snapshot={snapshot} enabled={true} />);
+      root.render(<ScanTools snapshot={snapshot} enabled={true} showActions={false} />);
     });
 
     expect(container.querySelector('.scan-running-bar')).not.toBeNull();
+    expect(container.querySelector('.scan-toolbar-actions')).toBeNull();
     expect(container.textContent).toContain('スクロール中... (50%)');
 
     const stopBtn = container.querySelector('.scan-stop-btn') as HTMLButtonElement;

@@ -16,9 +16,7 @@ interface VideoFilterBarProps {
   unknownMetadataCount: number;
   unprobedCount?: number;
   isProbing?: boolean;
-  probeProgress?: { current: number; total: number } | null;
   onStartProbing?: () => void;
-  onStopProbing?: () => void;
 }
 
 const AVAILABLE_VIDEO_FORMATS: Array<{ label: string; value: VideoFormat }> = [
@@ -39,9 +37,7 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
   unknownMetadataCount,
   unprobedCount = 0,
   isProbing = false,
-  probeProgress,
   onStartProbing,
-  onStopProbing,
 }) => {
   const toggleFormat = (fmt: VideoFormat) => {
     const isSelected = filter.formats.includes(fmt);
@@ -67,7 +63,7 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
   return (
     <div
       style={{
-        padding: '10px 14px',
+        padding: '8px 10px',
         backgroundColor: 'var(--color-bg-subtle)',
         borderBottom: '1px solid var(--color-border)',
         display: 'flex',
@@ -79,6 +75,7 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
       <div>
         <input
           type="text"
+          aria-label="動画URL・ファイル名で絞り込み"
           placeholder="動画URL・ファイル名で絞り込み..."
           value={filter.urlQuery}
           onChange={(e) => onChange({ ...filter, urlQuery: e.target.value })}
@@ -102,6 +99,7 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
             画質:
           </span>
           <select
+            aria-label="画質"
             value={filter.minResolution}
             onChange={(e) =>
               onChange({
@@ -111,6 +109,7 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
             }
             style={{
               width: '100%',
+              minWidth: 0,
               padding: '4px 6px',
               fontSize: 11,
               border: '1px solid var(--color-border-input)',
@@ -132,6 +131,7 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
             長さ:
           </span>
           <select
+            aria-label="長さ"
             value={filter.durationRange}
             onChange={(e) =>
               onChange({
@@ -141,6 +141,7 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
             }
             style={{
               width: '100%',
+              minWidth: 0,
               padding: '4px 6px',
               fontSize: 11,
               border: '1px solid var(--color-border-input)',
@@ -162,10 +163,12 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
             並び順:
           </span>
           <select
+            aria-label="並び順"
             value={sortOrder}
             onChange={(e) => onSortChange(e.target.value as VideoSortOrder)}
             style={{
               width: '100%',
+              minWidth: 0,
               padding: '4px 6px',
               fontSize: 11,
               border: '1px solid var(--color-border-input)',
@@ -269,45 +272,6 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
         </div>
       </div>
 
-      {/* Probe controls & progress bar */}
-      {isProbing && (
-        <div
-          style={{
-            fontSize: 11,
-            padding: '5px 8px',
-            borderRadius: 5,
-            backgroundColor: 'var(--color-primary-subtle)',
-            border: '1px solid var(--color-primary-subtle-border)',
-            color: 'var(--color-primary-text)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 6,
-          }}
-        >
-          <span style={{ fontWeight: 500 }}>
-            ⏳ 画質・長さを計測中... ({probeProgress?.current ?? 0} / {probeProgress?.total ?? 0})
-          </span>
-          {onStopProbing && (
-            <button
-              type="button"
-              onClick={onStopProbing}
-              style={{
-                fontSize: 10,
-                padding: '2px 6px',
-                borderRadius: 4,
-                border: '1px solid var(--color-border)',
-                backgroundColor: 'var(--color-bg-surface)',
-                color: 'var(--color-text-primary)',
-                cursor: 'pointer',
-              }}
-            >
-              ✕ 中止
-            </button>
-          )}
-        </div>
-      )}
-
       {!isProbing && unprobedCount > 0 && onStartProbing && (
         <div
           style={{
@@ -390,3 +354,24 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
     </div>
   );
 };
+
+export function VideoProbeStatus({
+  progress,
+  onStop,
+}: {
+  progress: { current: number; total: number } | null;
+  onStop: () => void;
+}) {
+  return (
+    <div className="scan-toolbar">
+      <div className="scan-running-bar">
+        <span className="scan-running-info" role="status">
+          画質・長さを計測中… ({progress?.current ?? 0} / {progress?.total ?? 0})
+        </span>
+        <button type="button" className="scan-stop-btn" onClick={onStop}>
+          中止
+        </button>
+      </div>
+    </div>
+  );
+}

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useId, useMemo, useState } from 'react';
 import type { ImageItem, TabSessionSnapshot, VideoItem } from '@shared/types';
 import { formatByteSize, getActiveVideoVariant } from '@shared/video-utils';
 import { DownloadFooter } from './components/DownloadFooter';
@@ -9,8 +9,8 @@ import { ImageGrid } from './components/ImageGrid';
 import { ImageLightboxModal } from './components/ImageLightboxModal';
 import { MediaModeTabs } from './components/MediaModeTabs';
 import { ScanTools } from './components/ScanTools';
-import { SelectionToolbar } from './components/SelectionToolbar';
-import { VideoFilterBar } from './components/VideoFilterBar';
+import { SelectionOptions, SelectionToolbar } from './components/SelectionToolbar';
+import { VideoFilterBar, VideoProbeStatus } from './components/VideoFilterBar';
 import { VideoGrid } from './components/VideoGrid';
 import { VideoLightboxModal } from './components/VideoLightboxModal';
 import { useActiveTabId } from './hooks/useActiveTabId';
@@ -75,6 +75,8 @@ export function App() {
   });
 
   const { mediaMode, setMediaMode, image: imagePrefs, video: videoPrefs } = usePanelPreferences();
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsId = useId();
   const selectedImageIds = useMemo(() => new Set(snapshot?.selectedIds), [snapshot?.selectedIds]);
   const selectedVideoIds = useMemo(() => new Set(snapshot?.selectedVideoIds), [snapshot?.selectedVideoIds]);
 
@@ -183,7 +185,16 @@ export function App() {
   const showImageEmptyView = isGlobalBlockedStatus || filteredItems.length === 0;
   const showVideoEmptyView = isGlobalBlockedStatus || filteredVideos.length === 0;
 
-  const activeHeaderCount = mediaMode === 'video' ? rawVideos.length : rawItems.length;
+  const isImageMode = mediaMode === 'image';
+  const selection = isImageMode ? imageSelection : videoSelection;
+  const selectedCount = isImageMode ? imageSelection.visibleSelectedCount : selectedVideoIds.size;
+  const hasVariants = isImageMode ? hasImageVariants : hasVideoVariants;
+  const { cardSize, setCardSize } = isImageMode ? imagePrefs : videoPrefs;
+
+  function applyHighestQuality() {
+    const itemIds = isImageMode ? filteredItems.map((item) => item.itemId) : videoSelection.visibleIds;
+    void batchSelectVariants('high_res', itemIds, mediaMode);
+  }
 
   return (
     <div
@@ -205,7 +216,6 @@ export function App() {
       <Header
         domain={snapshot?.domain}
         pageTitle={snapshot?.pageTitle}
-        itemCount={activeHeaderCount}
         scanStatus={scanStatus}
         statusMessage={snapshot?.statusMessage}
         onRescan={triggerRescan}
@@ -214,60 +224,92 @@ export function App() {
       />
 
       {!isGlobalBlockedStatus && (
-        <MediaModeTabs
-          activeMode={mediaMode}
-          onChangeMode={setMediaMode}
-          imageCount={rawItems.length}
-          videoCount={rawVideos.length}
-          selectedImageCount={imageSelection.visibleSelectedCount}
-          selectedVideoCount={selectedVideoIds.size}
-        />
-      )}
-
-      {mediaMode === 'image' ? (
         <>
-          {!isGlobalBlockedStatus && (
-            <>
-              <ScanTools snapshot={snapshot} enabled={isPanelVisible} />
+          <div className="panel-mode-bar">
+            <MediaModeTabs
+              activeMode={mediaMode}
+              onChangeMode={setMediaMode}
+              imageCount={rawItems.length}
+              videoCount={rawVideos.length}
+              selectedImageCount={imageSelection.visibleSelectedCount}
+              selectedVideoCount={selectedVideoIds.size}
+            />
+            <button
+              type="button"
+              className="panel-control panel-options-toggle"
+              aria-controls={optionsId}
+              aria-expanded={optionsOpen}
+              onClick={() => setOptionsOpen((open) => !open)}
+            >
+              フィルター・設定
+            </button>
+          </div>
+
+          <SelectionToolbar
+            mediaMode={mediaMode}
+            selectedCount={selectedCount}
+            hiddenSelectedCount={selection.hiddenSelectedCount}
+            selectableCount={selection.selectableCount}
+            onSelectVisible={selection.onSelectVisible}
+            onDownloadSelected={isImageMode
+              ? () => void enqueueDownloads(imageSelection.visibleSelectedIds)
+              : handleBatchVideoDownload}
+          />
+
+          {isImageMode ? (
+            <ScanTools snapshot={snapshot} enabled={isPanelVisible} showActions={optionsOpen} />
+          ) : isVideoProbing && (
+            <VideoProbeStatus progress={videoProbeProgress} onStop={stopVideoProbing} />
+          )}
+
+          <div id={optionsId} className="panel-options" hidden={!optionsOpen}>
+            {isImageMode ? (
               <FilterBar
                 filter={imagePrefs.filter}
                 onChange={imagePrefs.setFilter}
                 sortOrder={imagePrefs.sortOrder}
                 onSortChange={imagePrefs.setSortOrder}
-                onReset={imagePrefs.resetFilter}
+                onClear={imagePrefs.clearFilter}
                 unknownDimensionsCount={unknownDimensionIds.size}
               />
-
-              <SelectionToolbar
-                mediaMode="image"
-                selectedCount={imageSelection.visibleSelectedCount}
-                hiddenSelectedCount={imageSelection.hiddenSelectedCount}
-                visibleCount={filteredItems.length}
-                selectableVisibleCount={imageSelection.selectableCount}
-                visibleSelectedCount={imageSelection.visibleSelectedCount}
-                hasVariants={hasImageVariants}
-                cardSize={imagePrefs.cardSize}
-                onCardSizeChange={imagePrefs.setCardSize}
-                autoSelectAll={imagePrefs.autoSelectAll}
-                onAutoSelectAllChange={imagePrefs.setAutoSelectAll}
-                onSelectVisible={imageSelection.onSelectVisible}
-                onDeselectVisible={imageSelection.onDeselectVisible}
-                onClearAll={() => void clearAllSelection('image')}
-                onDownloadSelected={() => void enqueueDownloads(imageSelection.visibleSelectedIds)}
-                onApplyVariantPreference={(target) =>
-                  void batchSelectVariants(target, filteredItems.map((item) => item.itemId), 'image')
-                }
+            ) : (
+              <VideoFilterBar
+                filter={videoPrefs.filter}
+                onChange={videoPrefs.setFilter}
+                sortOrder={videoPrefs.sortOrder}
+                onSortChange={videoPrefs.setSortOrder}
+                onReset={videoPrefs.resetFilter}
+                unknownMetadataCount={unknownVideoMetadataCount}
+                unprobedCount={unprobedVideoCount}
+                isProbing={isVideoProbing}
+                onStartProbing={() => void startVideoProbing()}
               />
-            </>
-          )}
+            )}
+            <SelectionOptions
+              mediaMode={mediaMode}
+              cardSize={cardSize}
+              onCardSizeChange={setCardSize}
+              autoSelectAll={isImageMode ? imagePrefs.autoSelectAll : undefined}
+              onAutoSelectAllChange={isImageMode ? imagePrefs.setAutoSelectAll : undefined}
+              canDeselectVisible={selection.visibleSelectedCount > 0}
+              canClearAll={selectedCount > 0 || selection.hiddenSelectedCount > 0}
+              onDeselectVisible={selection.onDeselectVisible}
+              onClearAll={() => void clearAllSelection(mediaMode)}
+              onApplyHighestQuality={hasVariants ? applyHighestQuality : undefined}
+            />
+          </div>
+        </>
+      )}
 
+      {isImageMode ? (
+        <>
           {showImageEmptyView ? (
             <EmptyOrStatusView
               mediaMode="image"
               scanStatus={scanStatus}
               statusMessage={snapshot?.statusMessage}
               isFilterEmpty={rawItems.length > 0 && filteredItems.length === 0}
-              onClearFilter={imagePrefs.resetFilter}
+              onClearFilter={imagePrefs.clearFilter}
               onRescan={triggerRescan}
             />
           ) : (
@@ -287,43 +329,6 @@ export function App() {
         </>
       ) : (
         <>
-          {!isGlobalBlockedStatus && (
-            <>
-              <VideoFilterBar
-                filter={videoPrefs.filter}
-                onChange={videoPrefs.setFilter}
-                sortOrder={videoPrefs.sortOrder}
-                onSortChange={videoPrefs.setSortOrder}
-                onReset={videoPrefs.resetFilter}
-                unknownMetadataCount={unknownVideoMetadataCount}
-                unprobedCount={unprobedVideoCount}
-                isProbing={isVideoProbing}
-                probeProgress={videoProbeProgress}
-                onStartProbing={() => void startVideoProbing()}
-                onStopProbing={stopVideoProbing}
-              />
-
-              <SelectionToolbar
-                mediaMode="video"
-                selectedCount={selectedVideoIds.size}
-                hiddenSelectedCount={videoSelection.hiddenSelectedCount}
-                visibleCount={filteredVideos.length}
-                selectableVisibleCount={videoSelection.selectableCount}
-                visibleSelectedCount={videoSelection.visibleSelectedCount}
-                hasVariants={hasVideoVariants}
-                cardSize={videoPrefs.cardSize}
-                onCardSizeChange={videoPrefs.setCardSize}
-                onSelectVisible={videoSelection.onSelectVisible}
-                onDeselectVisible={videoSelection.onDeselectVisible}
-                onClearAll={() => void clearAllSelection('video')}
-                onDownloadSelected={handleBatchVideoDownload}
-                onApplyVariantPreference={(target) =>
-                  void batchSelectVariants(target, videoSelection.visibleIds, 'video')
-                }
-              />
-            </>
-          )}
-
           {showVideoEmptyView ? (
             <EmptyOrStatusView
               mediaMode="video"

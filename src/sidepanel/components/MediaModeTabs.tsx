@@ -20,7 +20,6 @@ export const MediaModeTabs: React.FC<MediaModeTabsProps> = ({
 }) => {
   const renderTab = (
     mode: MediaMode,
-    icon: string,
     label: string,
     count: number,
     selectedCount: number,
@@ -35,13 +34,14 @@ export const MediaModeTabs: React.FC<MediaModeTabsProps> = ({
         aria-selected={isActive}
         onClick={() => onChangeMode(mode)}
         style={{
-          flex: 1,
+          flex: '1 0 auto',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 6,
-          padding: '6px 10px',
-          fontSize: 12,
+          gap: 4,
+          padding: '3px 5px',
+          minHeight: 26,
+          fontSize: 11,
           fontWeight: isActive ? 600 : 500,
           borderRadius: 6,
           border: isActive
@@ -55,12 +55,11 @@ export const MediaModeTabs: React.FC<MediaModeTabsProps> = ({
           whiteSpace: 'nowrap',
         }}
       >
-        <span>{icon}</span>
         <span>{label}</span>
         <span
           style={{
             fontSize: 11,
-            padding: '0 6px',
+            padding: '0 5px',
             borderRadius: 10,
             backgroundColor: isActive
               ? 'var(--color-primary-subtle)'
@@ -71,11 +70,11 @@ export const MediaModeTabs: React.FC<MediaModeTabsProps> = ({
         >
           {count}
         </span>
-        {selectedCount > 0 && (
+        {!isActive && selectedCount > 0 && (
           <span
             style={{
               fontSize: 10,
-              padding: '0 5px',
+                padding: '0 4px',
               borderRadius: 8,
               backgroundColor: 'var(--color-primary)',
               color: '#ffffff',
@@ -95,16 +94,13 @@ export const MediaModeTabs: React.FC<MediaModeTabsProps> = ({
       role="tablist"
       aria-label="メディア表示モード切替"
       style={{
-        padding: '6px 12px',
-        backgroundColor: 'var(--color-bg-subtle)',
-        borderBottom: '1px solid var(--color-border)',
         display: 'flex',
-        gap: 6,
-        flexShrink: 0,
+        gap: 4,
+        flex: '1 0 auto',
       }}
     >
-      {renderTab('image', '🖼️', '画像', imageCount, selectedImageCount)}
-      {renderTab('video', '🎬', '動画', videoCount, selectedVideoCount)}
+      {renderTab('image', '画像', imageCount, selectedImageCount)}
+      {renderTab('video', '動画', videoCount, selectedVideoCount)}
     </div>
   );
 };

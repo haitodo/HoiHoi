@@ -4,7 +4,6 @@ import type { ScanStatus } from '@shared/types';
 interface HeaderProps {
   domain?: string;
   pageTitle?: string;
-  itemCount: number;
   scanStatus: ScanStatus;
   statusMessage?: string;
   onRescan: () => void;
@@ -12,125 +11,91 @@ interface HeaderProps {
   onTogglePin?: () => void;
 }
 
+const SCAN_STATUS_LABELS: Record<ScanStatus, string> = {
+  unscanned: '未スキャン',
+  scanning: 'スキャン中…',
+  watching: '監視中',
+  restricted: '保護ページ',
+  stale: 'ページ移動済み',
+  limit_reached: '上限到達',
+  error: 'スキャン失敗',
+};
+
 export const Header: React.FC<HeaderProps> = ({
   domain,
   pageTitle,
-  itemCount,
   scanStatus,
   statusMessage,
   onRescan,
   isPinned,
   onTogglePin,
 }) => {
+  const statusLabel = SCAN_STATUS_LABELS[scanStatus];
+  const statusTitle = statusMessage || (scanStatus === 'watching'
+    ? '監視中 (スクロールで自動追加)'
+    : statusLabel);
+
   return (
     <header
       style={{
-        padding: '10px 14px',
+        padding: '4px 8px',
         borderBottom: '1px solid var(--color-border)',
         backgroundColor: 'var(--color-bg-surface)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-        boxSizing: 'border-box',
+        gap: 6,
+        flexShrink: 0,
       }}
     >
-      <div style={{ overflow: 'hidden', marginRight: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <img
-            src="icons/icon-48.png"
-            alt="HoiHoi"
-            style={{ width: 18, height: 18, borderRadius: 4, flexShrink: 0 }}
-          />
-          <span
-            style={{
-              fontWeight: 600,
-              fontSize: 13,
-              color: 'var(--color-text-primary)',
-              maxWidth: 180,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-            title={pageTitle ? `${pageTitle} (${domain ?? ''})` : domain || 'HoiHoi'}
-          >
-            {pageTitle || domain || 'HoiHoi'}
-          </span>
-          <span
-            style={{
-              fontSize: 11,
-              padding: '1px 6px',
-              borderRadius: 10,
-              backgroundColor: 'var(--color-primary-subtle)',
-              color: 'var(--color-primary-text)',
-              border: '1px solid var(--color-primary-subtle-border)',
-              fontWeight: 500,
-            }}
-          >
-            {itemCount} 件
-          </span>
-        </div>
-
-        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>
-          {scanStatus === 'scanning' && 'スキャン中...'}
-          {scanStatus === 'watching' && '監視中 (スクロールで自動追加)'}
-          {scanStatus === 'limit_reached' && '上限到達 (2,000件)'}
-          {scanStatus === 'stale' && (statusMessage || 'ページ移動済み')}
-          {scanStatus === 'restricted' && '保護ページ (スキャン不可)'}
-          {scanStatus === 'unscanned' && '未スキャン'}
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <img
+          src="icons/icon-48.png"
+          alt=""
+          style={{ width: 18, height: 18, borderRadius: 4, flexShrink: 0 }}
+        />
+        <span
+          style={{
+            fontWeight: 600,
+            fontSize: 12,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={pageTitle && domain ? `${pageTitle} (${domain})` : pageTitle || domain || 'HoiHoi'}
+        >
+          {pageTitle || domain || 'HoiHoi'}
+        </span>
+        <span
+          style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}
+          title={statusTitle}
+        >
+          {statusLabel}
+        </span>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         {onTogglePin && (
           <button
+            type="button"
+            className="panel-control"
             onClick={onTogglePin}
-            style={{
-              padding: '4px 8px',
-              fontSize: 12,
-              fontWeight: 500,
-              border: isPinned
-                ? '1px solid var(--color-primary)'
-                : '1px solid var(--color-border-input)',
-              borderRadius: 6,
-              backgroundColor: isPinned
-                ? 'var(--color-primary-subtle)'
-                : 'var(--color-bg-surface)',
-              color: isPinned
-                ? 'var(--color-primary-text)'
-                : 'var(--color-text-secondary)',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
+            aria-pressed={isPinned ?? false}
             title={
               isPinned
                 ? 'タブ固定中: 他のタブや別ウィンドウを選択してもこのページの表示を維持します（クリックで追従モードに変更）'
                 : 'タブ追従中: ブラウザのアクティブタブに合わせて表示を切り替えます（クリックで現在のタブに固定）'
             }
           >
-            <span>{isPinned ? '📌 固定中' : '🔓 追従中'}</span>
+            {isPinned ? '📌 固定中' : '🔓 追従中'}
           </button>
         )}
 
         <button
+          type="button"
+          className="panel-control"
           onClick={onRescan}
           disabled={scanStatus === 'restricted'}
-          style={{
-            padding: '4px 10px',
-            fontSize: 12,
-            fontWeight: 500,
-            border: '1px solid var(--color-border-input)',
-            borderRadius: 6,
-            backgroundColor: 'var(--color-bg-subtle)',
-            color: 'var(--color-text-primary)',
-            cursor: scanStatus === 'restricted' ? 'not-allowed' : 'pointer',
-            whiteSpace: 'nowrap',
-          }}
           title="ページを再スキャンして新しい画像を統合します"
         >
           再スキャン

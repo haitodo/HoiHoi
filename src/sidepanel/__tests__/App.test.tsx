@@ -75,8 +75,12 @@ describe('side panel media views', () => {
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const preferences = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => preferences.get(key) ?? null,
+      setItem: (key: string, value: string) => preferences.set(key, value),
+    });
     vi.clearAllMocks();
-    localStorage.clear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -85,7 +89,6 @@ describe('side panel media views', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
-    localStorage.clear();
     vi.unstubAllGlobals();
   });
 
@@ -107,7 +110,7 @@ describe('side panel media views', () => {
 
   function clickButton(text: string, selector = 'button') {
     const button = [...container.querySelectorAll<HTMLButtonElement>(selector)]
-      .find((candidate) => candidate.textContent?.includes(text));
+      .find((candidate) => !candidate.closest('[hidden]') && candidate.textContent?.includes(text));
     expect(button).toBeDefined();
     act(() => button!.click());
   }
@@ -121,6 +124,46 @@ describe('side panel media views', () => {
     render({ scanStatus: 'restricted' });
     clickButton('再スキャン');
     expect(panel.triggerRescan).toHaveBeenCalledOnce();
+  });
+
+  it('keeps selection and download accessible with collapsed options and 500 px defaults on both axes', () => {
+    const matching = image(1, 'matching', 500);
+    const tooNarrow = image(2, 'too-narrow', 499, 800);
+    const tooShort = image(3, 'too-short', 800, 499);
+    render({ items: [matching, tooNarrow, tooShort], selectedIds: [matching.itemId] });
+
+    const optionsToggle = container.querySelector<HTMLButtonElement>('.panel-options-toggle')!;
+    const options = document.getElementById(optionsToggle.getAttribute('aria-controls')!)!;
+    const thumbnails = () => [...container.querySelectorAll<HTMLImageElement>('img[alt="Thumbnail"]')]
+      .map((img) => img.src);
+    expect(optionsToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(options.hidden).toBe(true);
+    expect(container.querySelector('.scan-toolbar')).toBeNull();
+    expect(thumbnails()).toEqual([matching.selectedUrl]);
+
+    clickButton('表示中を全選択 (1件)');
+    expect(panel.selectAllVisible).toHaveBeenCalledWith([matching.itemId], 'image');
+    clickButton('ダウンロード (1)');
+    expect(panel.enqueueDownloads).toHaveBeenCalledWith([matching.itemId]);
+
+    clickButton('フィルター・設定');
+    expect(optionsToggle.getAttribute('aria-expanded')).toBe('true');
+    expect(options.hidden).toBe(false);
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="最小幅"]')!.value).toBe('500');
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="最小高"]')!.value).toBe('500');
+    expect(container.querySelectorAll('.scan-action-btn')).toHaveLength(3);
+    clickButton('フィルター・設定');
+    expect(options.hidden).toBe(true);
+
+    render({ items: [tooNarrow, tooShort] });
+    expect(thumbnails()).toEqual([]);
+    clickButton('フィルターをクリア');
+    expect(thumbnails()).toEqual([tooNarrow.selectedUrl, tooShort.selectedUrl]);
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    render({ items: [tooNarrow, tooShort] });
+    expect(thumbnails()).toEqual([tooNarrow.selectedUrl, tooShort.selectedUrl]);
   });
 
   it('applies saved width filters to the list, selection, and batch download', () => {
@@ -137,12 +180,12 @@ describe('side panel media views', () => {
     const visibleImages = () => [...container.querySelectorAll<HTMLImageElement>('img[src^="https://example.com/"]')]
       .map((img) => img.src);
     expect(visibleImages()).toEqual([images[3]!.selectedUrl, images[1]!.selectedUrl]);
-    expect(container.textContent).toContain('選択中: 1 件');
     expect(container.textContent).toContain('条件外 2件');
-    expect(container.textContent).toContain('寸法不明のため判定できない画像: 1件');
 
     clickButton('ダウンロード (1)');
     expect(panel.enqueueDownloads).toHaveBeenCalledWith(['item_2']);
+    clickButton('フィルター・設定');
+    expect(container.textContent).toContain('寸法不明のため判定できない画像: 1件');
     clickButton('表示中を解除');
     expect(panel.deselectVisible).toHaveBeenCalledWith(['item_2'], 'image');
 
@@ -172,7 +215,7 @@ describe('side panel media views', () => {
   it('hides the previous page’s images and selection when the tab navigates', () => {
     render({ scanStatus: 'stale', items: [image(1, 'previous-page', 800)], selectedIds: ['item_1'] });
     expect(container.querySelector('img[src="https://example.com/previous-page.jpg"]')).toBeNull();
-    expect(container.textContent).not.toContain('選択中:');
+    expect(container.querySelector('.selection-toolbar')).toBeNull();
     expect(container.textContent).toContain('再スキャンを試行');
   });
 
@@ -192,6 +235,7 @@ describe('side panel media views', () => {
     const visibleNames = () => [...container.querySelectorAll('[title^="https://example.com/"]')]
       .map((node) => node.textContent);
     expect(visibleNames()).toEqual(['descriptor-360p.mp4', 'in-url-1080p.mp4', 'low.mp4', 'unknown-resolution.mp4']);
+    clickButton('フィルター・設定');
     expect(container.textContent).toContain('画質・長さ未取得の動画が 1 件非表示です');
 
     const sort = container.querySelector<HTMLOptionElement>('option[value="resolution_asc"]')!.closest('select')!;
@@ -248,6 +292,7 @@ describe('side panel media views', () => {
     expect(panel.selectAllVisible).toHaveBeenCalledWith(['item_1', 'item_2'], 'image');
     panel.selectAllVisible.mockClear();
 
+    clickButton('フィルター・設定');
     const label = [...container.querySelectorAll('label')].find((l) => l.textContent?.includes('スキャン時に全選択'));
     expect(label).toBeDefined();
     const autoSelectCheckbox = label!.querySelector<HTMLInputElement>('input[type="checkbox"]');
@@ -307,15 +352,17 @@ describe('side panel media views', () => {
   });
 
   it('scales image thumbnails to card width in medium and large modes without leaving oversized empty frames', () => {
-    render({ items: [image(1, 'sample', 240, 160)] });
+    render({ items: [image(1, 'sample', 800, 600)] });
+    clickButton('フィルター・設定');
+    const sizeButtons = '[role="group"][aria-label="表示サイズ"] button';
 
-    clickButton('中', 'button');
+    clickButton('中', sizeButtons);
     const mediumImg = container.querySelector<HTMLImageElement>('img[alt="Thumbnail"]')!;
     expect(mediumImg.style.width).toBe('100%');
     expect(mediumImg.style.height).toBe('100%');
     expect(mediumImg.style.objectFit).toBe('contain');
 
-    clickButton('大', 'button');
+    clickButton('大', sizeButtons);
     const largeImg = container.querySelector<HTMLImageElement>('img[alt="Thumbnail"]')!;
     expect(largeImg.style.width).toBe('100%');
     expect(largeImg.style.height).toBe('auto');

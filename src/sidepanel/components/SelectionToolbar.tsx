@@ -1,277 +1,154 @@
-import React from 'react';
 import type { CardSize, MediaMode } from '@shared/types';
 
 interface SelectionToolbarProps {
-  mediaMode?: MediaMode;
+  mediaMode: MediaMode;
   selectedCount: number;
   hiddenSelectedCount: number;
-  visibleCount: number;
-  selectableVisibleCount?: number;
-  visibleSelectedCount?: number;
-  hasVariants?: boolean;
-  cardSize?: CardSize;
-  onCardSizeChange?: (size: CardSize) => void;
-  autoSelectAll?: boolean;
-  onAutoSelectAllChange?: (enabled: boolean) => void;
+  selectableCount: number;
   onSelectVisible: () => void;
-  onDeselectVisible?: () => void;
-  onClearAll: () => void;
   onDownloadSelected: () => void;
-  onApplyVariantPreference?: (target: 'high_res' | 'display') => void;
 }
 
-export const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
-  mediaMode = 'image',
+export function SelectionToolbar({
+  mediaMode,
   selectedCount,
   hiddenSelectedCount,
-  visibleCount,
-  selectableVisibleCount,
-  visibleSelectedCount = 0,
-  hasVariants,
-  cardSize = 'medium',
+  selectableCount,
+  onSelectVisible,
+  onDownloadSelected,
+}: SelectionToolbarProps) {
+  const mediaNoun = mediaMode === 'video' ? '動画' : '画像';
+  return (
+    <div className="selection-toolbar" role="group" aria-label="選択とダウンロード">
+      <button
+        type="button"
+        className="panel-control"
+        onClick={onSelectVisible}
+        disabled={selectableCount === 0}
+        title={`現在フィルターされて保存条件を満たす${mediaNoun}をすべて選択します`}
+      >
+        表示中を全選択 ({selectableCount}件)
+      </button>
+
+      <button
+        type="button"
+        className="panel-control panel-control-primary"
+        onClick={onDownloadSelected}
+        disabled={selectedCount === 0}
+      >
+        ダウンロード ({selectedCount})
+      </button>
+
+      {hiddenSelectedCount > 0 && (
+        <span
+          className="selection-hidden-count"
+          title={`絞り込み条件の対象外に選択中の${mediaNoun}があります`}
+        >
+          {mediaMode === 'image' ? '条件外' : '非表示'} {hiddenSelectedCount}件
+        </span>
+      )}
+    </div>
+  );
+}
+
+const CARD_SIZE_OPTIONS: ReadonlyArray<{ value: CardSize; label: string; title: string }> = [
+  { value: 'auto', label: '自動', title: 'パネル幅に合わせて列数を自動調整' },
+  { value: 'small', label: '小', title: '一覧性を重視した小サイズ表示' },
+  { value: 'medium', label: '中', title: '標準サイズ表示' },
+  { value: 'large', label: '大', title: '詳細を確認しやすい大サイズ表示' },
+];
+
+interface SelectionOptionsProps {
+  mediaMode: MediaMode;
+  cardSize: CardSize;
+  onCardSizeChange: (size: CardSize) => void;
+  autoSelectAll?: boolean;
+  onAutoSelectAllChange?: (enabled: boolean) => void;
+  canDeselectVisible: boolean;
+  canClearAll: boolean;
+  onDeselectVisible: () => void;
+  onClearAll: () => void;
+  onApplyHighestQuality?: () => void;
+}
+
+export function SelectionOptions({
+  mediaMode,
+  cardSize,
   onCardSizeChange,
   autoSelectAll,
   onAutoSelectAllChange,
-  onSelectVisible,
+  canDeselectVisible,
+  canClearAll,
   onDeselectVisible,
   onClearAll,
-  onDownloadSelected,
-  onApplyVariantPreference,
-}) => {
-  const effectiveSelectableCount = selectableVisibleCount ?? visibleCount;
+  onApplyHighestQuality,
+}: SelectionOptionsProps) {
   const mediaNoun = mediaMode === 'video' ? '動画' : '画像';
-  const hasSelection = selectedCount > 0 || hiddenSelectedCount > 0;
+
   return (
-    <div
-      style={{
-        padding: '8px 10px',
-        backgroundColor: 'var(--color-bg-surface)',
-        borderBottom: '1px solid var(--color-border)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 6,
-        fontSize: 11,
-        boxSizing: 'border-box',
-        flexWrap: 'wrap',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
-            選択中: {selectedCount} 件
-          </span>
-          {hiddenSelectedCount > 0 && (
-            <span style={{ color: 'var(--color-warning-text)', fontSize: 11 }}>
-              ({mediaMode === 'image' ? '条件外' : '非表示'} {hiddenSelectedCount}件)
-            </span>
-          )}
+    <div className="selection-options">
+      <div className="selection-options-row">
+        <div className="selection-options-row" role="group" aria-label="表示サイズ">
+          <span>表示サイズ</span>
+          {CARD_SIZE_OPTIONS.map(({ value, label, title }) => (
+            <button
+              key={value}
+              type="button"
+              className="panel-control"
+              aria-pressed={cardSize === value}
+              onClick={() => onCardSizeChange(value)}
+              title={title}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
-        {onCardSizeChange && (
-          <div
-            style={{
-              display: 'inline-flex',
-              borderRadius: 4,
-              border: '1px solid var(--color-border-input)',
-              overflow: 'hidden',
-              backgroundColor: 'var(--color-bg-surface)',
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => onCardSizeChange('auto')}
-              style={{
-                padding: '2px 7px',
-                fontSize: 10,
-                backgroundColor: cardSize === 'auto' ? 'var(--color-primary)' : 'var(--color-bg-surface)',
-                color: cardSize === 'auto' ? '#ffffff' : 'var(--color-text-secondary)',
-                border: 'none',
-                borderRight: '1px solid var(--color-border-input)',
-                cursor: 'pointer',
-                fontWeight: cardSize === 'auto' ? 600 : 400,
-                whiteSpace: 'nowrap',
-              }}
-              title="自動調整（パネル幅に合わせて2〜5列レスポンシブ配置）"
-            >
-              自動
-            </button>
-            <button
-              type="button"
-              onClick={() => onCardSizeChange('small')}
-              style={{
-                padding: '2px 6px',
-                fontSize: 10,
-                backgroundColor: cardSize === 'small' ? 'var(--color-primary)' : 'var(--color-bg-surface)',
-                color: cardSize === 'small' ? '#ffffff' : 'var(--color-text-secondary)',
-                border: 'none',
-                borderRight: '1px solid var(--color-border-input)',
-                cursor: 'pointer',
-                fontWeight: cardSize === 'small' ? 600 : 400,
-                whiteSpace: 'nowrap',
-              }}
-              title="小サイズ表示（一覧性重視・3〜5列）"
-            >
-              小
-            </button>
-            <button
-              type="button"
-              onClick={() => onCardSizeChange('medium')}
-              style={{
-                padding: '2px 6px',
-                fontSize: 10,
-                backgroundColor: cardSize === 'medium' ? 'var(--color-primary)' : 'var(--color-bg-surface)',
-                color: cardSize === 'medium' ? '#ffffff' : 'var(--color-text-secondary)',
-                border: 'none',
-                borderRight: '1px solid var(--color-border-input)',
-                cursor: 'pointer',
-                fontWeight: cardSize === 'medium' ? 600 : 400,
-                whiteSpace: 'nowrap',
-              }}
-              title="中サイズ表示（標準・2〜3列）"
-            >
-              中
-            </button>
-            <button
-              type="button"
-              onClick={() => onCardSizeChange('large')}
-              style={{
-                padding: '2px 6px',
-                fontSize: 10,
-                backgroundColor: cardSize === 'large' ? 'var(--color-primary)' : 'var(--color-bg-surface)',
-                color: cardSize === 'large' ? '#ffffff' : 'var(--color-text-secondary)',
-                border: 'none',
-                cursor: 'pointer',
-                fontWeight: cardSize === 'large' ? 600 : 400,
-                whiteSpace: 'nowrap',
-              }}
-              title="大サイズ表示（詳細重視・サイドバー幅に合わせた特大表示）"
-            >
-              大
-            </button>
-          </div>
-        )}
-
-        {mediaMode === 'image' && onAutoSelectAllChange && (
+        {onAutoSelectAllChange && (
           <label
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              cursor: 'pointer',
-              fontSize: 11,
-              color: 'var(--color-text-secondary)',
-              userSelect: 'none',
-              marginLeft: 2,
-            }}
+            className="auto-select-option"
             title="ページスキャン時に検出された画像を自動で全選択します（一括取得・除外選択向け）"
           >
             <input
               type="checkbox"
               checked={autoSelectAll ?? true}
               onChange={(e) => onAutoSelectAllChange(e.target.checked)}
-              style={{ cursor: 'pointer', margin: 0 }}
             />
-            <span>スキャン時に全選択</span>
+            スキャン時に全選択
           </label>
         )}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        {hasVariants && onApplyVariantPreference && (
+      <div className="selection-options-row">
+        <button
+          type="button"
+          className="panel-control"
+          onClick={onDeselectVisible}
+          disabled={!canDeselectVisible}
+          title={`現在表示されている選択中の${mediaNoun}のみ解除します（非表示中の選択は保持）`}
+        >
+          表示中を解除
+        </button>
+        <button
+          type="button"
+          className="panel-control"
+          onClick={onClearAll}
+          disabled={!canClearAll}
+          title="条件外も含め、すべての選択を解除します"
+        >
+          全解除
+        </button>
+        {onApplyHighestQuality && (
           <button
             type="button"
-            onClick={() => onApplyVariantPreference('high_res')}
-            style={{
-              padding: '3px 8px',
-              fontSize: 11,
-              border: '1px solid var(--color-primary-subtle-border)',
-              borderRadius: 4,
-              backgroundColor: 'var(--color-primary-subtle)',
-              color: 'var(--color-primary-text)',
-              cursor: 'pointer',
-              fontWeight: 500,
-            }}
+            className="panel-control"
+            onClick={onApplyHighestQuality}
             title={`最高画質の保存可能な${mediaNoun}候補に一括切替します`}
           >
             {mediaMode === 'video' ? '高画質を一括適用' : '高解像度を一括適用'}
           </button>
         )}
-
-        <button
-          type="button"
-          onClick={onSelectVisible}
-          disabled={effectiveSelectableCount === 0}
-          style={{
-            padding: '3px 8px',
-            fontSize: 11,
-            border: '1px solid var(--color-border-input)',
-            borderRadius: 4,
-            backgroundColor: 'var(--color-bg-subtle)',
-            color: 'var(--color-text-primary)',
-            cursor: effectiveSelectableCount === 0 ? 'not-allowed' : 'pointer',
-          }}
-          title={`現在フィルターされて保存条件を満たす${mediaNoun}をすべて選択します`}
-        >
-          表示中を全選択 ({effectiveSelectableCount}件)
-        </button>
-
-        {onDeselectVisible && (
-          <button
-            type="button"
-            onClick={onDeselectVisible}
-            disabled={visibleSelectedCount === 0}
-            style={{
-              padding: '3px 8px',
-              fontSize: 11,
-              border: '1px solid var(--color-border-input)',
-              borderRadius: 4,
-              backgroundColor: 'var(--color-bg-subtle)',
-              color: 'var(--color-text-primary)',
-              cursor: visibleSelectedCount === 0 ? 'not-allowed' : 'pointer',
-            }}
-            title={`現在表示されている選択中の${mediaNoun}のみ解除します（非表示中の選択は保持）`}
-          >
-            表示中を解除
-          </button>
-        )}
-
-        <button
-          type="button"
-          onClick={onClearAll}
-          disabled={!hasSelection}
-          style={{
-            padding: '3px 8px',
-            fontSize: 11,
-            border: '1px solid var(--color-border-input)',
-            borderRadius: 4,
-            backgroundColor: 'var(--color-bg-subtle)',
-            color: 'var(--color-text-primary)',
-            cursor: hasSelection ? 'pointer' : 'not-allowed',
-          }}
-          title="条件外も含め、すべての選択を解除します"
-        >
-          全解除
-        </button>
-
-        <button
-          type="button"
-          onClick={onDownloadSelected}
-          disabled={selectedCount === 0}
-          style={{
-            padding: '4px 10px',
-            fontSize: 11,
-            fontWeight: 600,
-            border: 'none',
-            borderRadius: 4,
-            backgroundColor: selectedCount > 0 ? 'var(--color-primary)' : 'var(--color-bg-subtle)',
-            color: selectedCount > 0 ? '#ffffff' : 'var(--color-text-muted)',
-            cursor: selectedCount > 0 ? 'pointer' : 'not-allowed',
-          }}
-        >
-          ダウンロード ({selectedCount})
-        </button>
       </div>
     </div>
   );
-};
+}

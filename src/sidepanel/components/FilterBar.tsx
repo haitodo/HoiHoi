@@ -6,7 +6,7 @@ interface FilterBarProps {
   onChange: (next: FilterState) => void;
   sortOrder: SortOrder;
   onSortChange: (order: SortOrder) => void;
-  onReset?: () => void;
+  onClear?: () => void;
   unknownDimensionsCount: number;
 }
 
@@ -25,7 +25,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onChange,
   sortOrder,
   onSortChange,
-  onReset,
+  onClear,
   unknownDimensionsCount,
 }) => {
   const toggleFormat = (fmt: ImageFormat) => {
@@ -47,7 +47,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   return (
     <div
       style={{
-        padding: '10px 14px',
+        padding: '8px 10px',
         backgroundColor: 'var(--color-bg-subtle)',
         borderBottom: '1px solid var(--color-border)',
         display: 'flex',
@@ -59,6 +59,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
       <div>
         <input
           type="text"
+          aria-label="画像URLで絞り込み"
           placeholder="URL部分一致で絞り込み..."
           value={filter.urlQuery}
           onChange={(e) => onChange({ ...filter, urlQuery: e.target.value })}
@@ -96,6 +97,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             }
             style={{
               width: '100%',
+              minWidth: 0,
               padding: '4px 6px',
               fontSize: 11,
               border: '1px solid var(--color-border-input)',
@@ -125,6 +127,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             }
             style={{
               width: '100%',
+              minWidth: 0,
               padding: '4px 6px',
               fontSize: 11,
               border: '1px solid var(--color-border-input)',
@@ -140,10 +143,12 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             並び順:
           </span>
           <select
+            aria-label="並び順"
             value={sortOrder}
             onChange={(e) => onSortChange(e.target.value as SortOrder)}
             style={{
               width: '100%',
+              minWidth: 0,
               padding: '4px 6px',
               fontSize: 11,
               border: '1px solid var(--color-border-input)',
@@ -202,10 +207,10 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           })}
         </div>
 
-        {onReset && isFilterActive && (
+        {onClear && isFilterActive && (
           <button
             type="button"
-            onClick={onReset}
+            onClick={onClear}
             style={{
               fontSize: 11,
               color: 'var(--color-text-muted)',
@@ -216,9 +221,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               textDecoration: 'underline',
               whiteSpace: 'nowrap',
             }}
-            title="すべてのフィルター条件（検索・幅・高さ・形式）をリセットします"
+            title="すべてのフィルター条件（検索・幅・高さ・形式）を解除します"
           >
-            条件リセット
+            条件をクリア
           </button>
         )}
       </div>
@@ -236,11 +241,12 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            gap: 8,
           }}
         >
           <span>寸法不明のため判定できない画像: {unknownDimensionsCount}件</span>
           <label
-            style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', whiteSpace: 'nowrap' }}
             title="寸法不明の画像を確認できます。選択するには「寸法取得」でサイズを確認してください"
           >
             <input

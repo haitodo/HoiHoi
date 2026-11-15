@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { isCollectionPageUrl } from '@shared/pagination-utils';
 import type { TabSessionSnapshot } from '@shared/types';
 import { useScanTools } from '../hooks/useScanTools';
@@ -6,9 +6,11 @@ import { useScanTools } from '../hooks/useScanTools';
 export function ScanTools({
   snapshot,
   enabled,
+  showActions = true,
 }: {
   snapshot: TabSessionSnapshot | null;
   enabled: boolean;
+  showActions?: boolean;
 }) {
   const available =
     enabled &&
@@ -30,7 +32,6 @@ export function ScanTools({
   const blocked = !available || running;
 
   const [showNotice, setShowNotice] = useState(false);
-  const lastProgressRef = useRef(progress);
 
   useEffect(() => {
     if (running) {
@@ -44,7 +45,8 @@ export function ScanTools({
     }
   }, [running, progress]);
 
-  lastProgressRef.current = progress;
+  const notice = !running && showNotice && progress?.message ? progress : null;
+  if (!showActions && !running && !notice) return null;
 
   return (
     <div className="scan-toolbar" role="region" aria-label="スキャンツールバー">
@@ -80,7 +82,7 @@ export function ScanTools({
             <div className="scan-progress-bar" />
           </div>
         </div>
-      ) : (
+      ) : showActions && (
         <div className="scan-toolbar-actions">
           {/* 1. 寸法取得ボタン */}
           <button
@@ -173,14 +175,14 @@ export function ScanTools({
       )}
 
       {/* 完了・停止・失敗のインライン通知 */}
-      {!running && showNotice && progress && progress.message && (
+      {notice && (
         <div
-          className={`scan-notice-bar notice-${progress.status}`}
+          className={`scan-notice-bar notice-${notice.status}`}
           role="status"
           aria-live="polite"
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, overflow: 'hidden' }}>
-            {progress.status === 'completed' && (
+            {notice.status === 'completed' && (
               <svg
                 width="11"
                 height="11"
@@ -202,7 +204,7 @@ export function ScanTools({
                 whiteSpace: 'nowrap',
               }}
             >
-              {progress.message}
+              {notice.message}
             </span>
           </div>
           <button

@@ -1,12 +1,18 @@
 import { useCallback, useState } from 'react';
 import type { CardSize, FilterState, MediaMode, SortOrder, VideoFilterState, VideoSortOrder } from '@shared/types';
 
-const DEFAULT_IMAGE_FILTER: FilterState = {
+const EMPTY_IMAGE_FILTER: FilterState = {
   urlQuery: '',
   minWidth: null,
   minHeight: null,
   formats: [],
   includeUnknownDimensions: false,
+};
+
+const DEFAULT_IMAGE_FILTER: FilterState = {
+  ...EMPTY_IMAGE_FILTER,
+  minWidth: 500,
+  minHeight: 500,
 };
 
 const DEFAULT_VIDEO_FILTER: VideoFilterState = {
@@ -60,7 +66,8 @@ function useStoredChoice<T extends string>(key: string, fallback: T, choices: re
   return useStoredPreference(key, fallback, (saved) => choices.find((choice) => choice === saved) ?? fallback);
 }
 
-function parseMinimumSize(value: unknown): number | null {
+function parseMinimumSize(value: unknown, fallback: number | null): number | null {
+  if (value === undefined) return fallback;
   return typeof value === 'number' && value > 0 ? value : null;
 }
 
@@ -68,8 +75,8 @@ function parseImageFilter(raw: string): FilterState {
   const saved = JSON.parse(raw) as Partial<FilterState> | null;
   return {
     ...DEFAULT_IMAGE_FILTER,
-    minWidth: parseMinimumSize(saved?.minWidth),
-    minHeight: parseMinimumSize(saved?.minHeight),
+    minWidth: parseMinimumSize(saved?.minWidth, DEFAULT_IMAGE_FILTER.minWidth),
+    minHeight: parseMinimumSize(saved?.minHeight, DEFAULT_IMAGE_FILTER.minHeight),
     formats: Array.isArray(saved?.formats) ? saved.formats : [],
     includeUnknownDimensions: Boolean(saved?.includeUnknownDimensions),
   };
@@ -119,14 +126,14 @@ export function usePanelPreferences() {
     (saved) => saved === 'true',
     (value) => String(value),
   );
-  const resetImageFilter = useCallback(() => setImageFilter(DEFAULT_IMAGE_FILTER), [setImageFilter]);
+  const clearImageFilter = useCallback(() => setImageFilter(EMPTY_IMAGE_FILTER), [setImageFilter]);
   const resetVideoFilter = useCallback(() => setVideoFilter(DEFAULT_VIDEO_FILTER), [setVideoFilter]);
 
   return {
     mediaMode,
     setMediaMode,
     image: {
-      filter: imageFilter, setFilter: setImageFilter, resetFilter: resetImageFilter,
+      filter: imageFilter, setFilter: setImageFilter, clearFilter: clearImageFilter,
       sortOrder: imageSortOrder, setSortOrder: setImageSortOrder,
       cardSize: imageCardSize, setCardSize: setImageCardSize,
       autoSelectAll: imageAutoSelectAll, setAutoSelectAll: setImageAutoSelectAll,
