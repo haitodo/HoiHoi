@@ -72,7 +72,7 @@ describe('scan tool ownership bridge', () => {
   });
   it('allows explicit page collection on other HTTP sites without requiring a site allowlist', async () => {
     mocks.session.pageUrl = 'https://photos.example/gallery';
-    vi.mocked(chrome.tabs.get).mockResolvedValue({ url: mocks.session.pageUrl } as chrome.tabs.Tab);
+    vi.mocked(chrome.tabs.get as (tabId: number) => Promise<chrome.tabs.Tab>).mockResolvedValue({ url: mocks.session.pageUrl } as chrome.tabs.Tab);
     attachScanToolBridge(panel as any, () => true); start('pages');
     await vi.waitFor(() => expect(content.postMessage).toHaveBeenCalled());
     expect(content.postMessage).toHaveBeenCalledWith(expect.objectContaining({

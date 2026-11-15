@@ -269,10 +269,10 @@ describe('SessionStore', () => {
 
   it('merges 301-redirected CDN MP4 URLs via NetworkVideoSniffer without duplicating cards or downgrading HD', () => {
     let redirectListener:
-      | ((details: chrome.webRequest.WebRedirectionResponseDetails) => void)
+      | ((details: chrome.webRequest.OnBeforeRedirectDetails) => void)
       | undefined;
     let headersListener:
-      | ((details: chrome.webRequest.WebResponseHeadersDetails) => void)
+      | ((details: chrome.webRequest.OnHeadersReceivedDetails) => void)
       | undefined;
 
     const sessionData: Record<string, unknown> = {};
@@ -350,7 +350,7 @@ describe('SessionStore', () => {
       url: 'https://www.tokyomotion.net/vsrc/sd/test-sd-source',
       redirectUrl: resolvedSdCdnUrl,
       statusCode: 301,
-    } as chrome.webRequest.WebRedirectionResponseDetails);
+    } as chrome.webRequest.OnBeforeRedirectDetails);
 
     headersListener?.({
       tabId: sdTabId,
@@ -360,7 +360,7 @@ describe('SessionStore', () => {
         { name: 'content-type', value: 'video/mp4' },
         { name: 'content-range', value: 'bytes 0-65535/13364887' },
       ],
-    } as chrome.webRequest.WebResponseHeadersDetails);
+    } as chrome.webRequest.OnHeadersReceivedDetails);
 
     const sdSnap = store.getSnapshot(sdTabId);
     expect(sdSnap.videos).toHaveLength(1);
@@ -416,7 +416,7 @@ describe('SessionStore', () => {
       url: 'https://www.tokyomotion.net/vsrc/sd/111111',
       redirectUrl: 'https://www47.tokyomotion.net/video/abc/iphone/7654321.mp4?md5=test',
       statusCode: 301,
-    } as chrome.webRequest.WebRedirectionResponseDetails);
+    } as chrome.webRequest.OnBeforeRedirectDetails);
 
     headersListener?.({
       tabId: hdTabId,
@@ -426,7 +426,7 @@ describe('SessionStore', () => {
         { name: 'content-type', value: 'video/mp4' },
         { name: 'content-range', value: 'bytes 0-4095/20000000' },
       ],
-    } as chrome.webRequest.WebResponseHeadersDetails);
+    } as chrome.webRequest.OnHeadersReceivedDetails);
 
     const hdSnap = store.getSnapshot(hdTabId);
     expect(hdSnap.videos).toHaveLength(1);

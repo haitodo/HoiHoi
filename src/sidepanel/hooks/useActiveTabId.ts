@@ -87,7 +87,7 @@ export function useActiveTabId(): UseActiveTabIdResult {
     void init();
 
     // Listen for tab switching within the browser
-    const handleActivated = (activeInfo: chrome.tabs.TabActiveInfo) => {
+    const handleActivated = (activeInfo: chrome.tabs.OnActivatedInfo) => {
       if (!isMounted) return;
       const winId = currentWindowIdRef.current;
       // Strictly ignore activations in other windows!

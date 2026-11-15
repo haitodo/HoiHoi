@@ -15,7 +15,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@shared': resolve(__dirname, 'src/shared'),
+      '@shared': resolve(import.meta.dirname, 'src/shared'),
     },
   },
   build: {
@@ -24,8 +24,8 @@ export default defineConfig({
     target: 'chrome116',
     rollupOptions: {
       input: {
-        sidepanel: resolve(__dirname, 'sidepanel.html'),
-        background: resolve(__dirname, 'src/background/index.ts'),
+        sidepanel: resolve(import.meta.dirname, 'sidepanel.html'),
+        background: resolve(import.meta.dirname, 'src/background/index.ts'),
       },
       output: {
         entryFileNames: (chunkInfo) =>

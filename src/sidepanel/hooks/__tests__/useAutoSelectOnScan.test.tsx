@@ -11,7 +11,7 @@ interface TestItem {
 describe('useAutoSelectOnScan', () => {
   let container: HTMLDivElement;
   let root: Root;
-  let onSelectItemsMock: ReturnType<typeof vi.fn>;
+  let onSelectItemsMock: ReturnType<typeof vi.fn<UseAutoSelectOnScanOptions<TestItem>['onSelectItems']>>;
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);

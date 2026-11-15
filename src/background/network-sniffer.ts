@@ -40,8 +40,8 @@ function getHeaderValue(
 export class NetworkVideoSniffer {
   private readonly sessionStore: SessionStore;
   private readonly listeners = new Map<number, {
-    redirect: (details: chrome.webRequest.WebRedirectionResponseDetails) => void;
-    headers: (details: chrome.webRequest.WebResponseHeadersDetails) => void;
+    redirect: (details: chrome.webRequest.OnBeforeRedirectDetails) => void;
+    headers: (details: chrome.webRequest.OnHeadersReceivedDetails) => chrome.webRequest.BlockingResponse | undefined;
   }>();
   private readonly redirectSources = new Map<number, Map<string, string>>();
 
@@ -50,7 +50,7 @@ export class NetworkVideoSniffer {
   }
 
   private readonly onBeforeRedirect = (
-    details: chrome.webRequest.WebRedirectionResponseDetails,
+    details: chrome.webRequest.OnBeforeRedirectDetails,
   ): void => {
     if (!this.listeners.has(details.tabId)) return;
     if (details.initiator && details.initiator.startsWith('chrome-extension://')) return;
@@ -68,7 +68,7 @@ export class NetworkVideoSniffer {
   };
 
   private readonly onHeadersReceived = (
-    details: chrome.webRequest.WebResponseHeadersDetails,
+    details: chrome.webRequest.OnHeadersReceivedDetails,
   ): void => {
     if (!this.listeners.has(details.tabId)) return;
     if (details.initiator && details.initiator.startsWith('chrome-extension://')) return;
@@ -193,8 +193,11 @@ export class NetworkVideoSniffer {
     for (const tabId of desired) {
       if (!Number.isInteger(tabId) || tabId < 0 || this.listeners.has(tabId)) continue;
       const callbacks = {
-        redirect: (details: chrome.webRequest.WebRedirectionResponseDetails) => this.onBeforeRedirect(details),
-        headers: (details: chrome.webRequest.WebResponseHeadersDetails) => this.onHeadersReceived(details),
+        redirect: (details: chrome.webRequest.OnBeforeRedirectDetails) => this.onBeforeRedirect(details),
+        headers: (details: chrome.webRequest.OnHeadersReceivedDetails): chrome.webRequest.BlockingResponse | undefined => {
+          this.onHeadersReceived(details);
+          return undefined;
+        },
       };
       try {
         const filter: chrome.webRequest.RequestFilter = {

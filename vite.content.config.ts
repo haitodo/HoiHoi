@@ -10,7 +10,7 @@ export default defineConfig({
   publicDir: false,
   resolve: {
     alias: {
-      '@shared': resolve(__dirname, 'src/shared'),
+      '@shared': resolve(import.meta.dirname, 'src/shared'),
     },
   },
   define: {
@@ -21,7 +21,7 @@ export default defineConfig({
     emptyOutDir: false,
     target: 'chrome116',
     lib: {
-      entry: resolve(__dirname, 'src/content/scanner.ts'),
+      entry: resolve(import.meta.dirname, 'src/content/scanner.ts'),
       name: 'WicContentScanner',
       formats: ['iife'],
       fileName: () => 'content/scanner.js',
