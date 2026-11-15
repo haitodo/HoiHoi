@@ -6,6 +6,18 @@ import {
   formatVideoDuration,
   getActiveVideoVariant,
 } from '@shared/video-utils';
+import {
+  CameraIcon,
+  CheckIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CloseIcon,
+  CopyIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  PipIcon,
+  StopIcon,
+} from './Icons';
 
 interface VideoLightboxModalProps {
   videos: VideoItem[];
@@ -144,21 +156,7 @@ export const VideoLightboxModal: React.FC<VideoLightboxModalProps> = ({
   };
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1000,
-        backgroundColor: 'rgba(0, 0, 0, 0.9)',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        padding: 12,
-        boxSizing: 'border-box',
-        backdropFilter: 'blur(4px)',
-      }}
-    >
+    <div onClick={onClose} className="lightbox-backdrop">
       {/* Top Bar */}
       <div
         onClick={(e) => e.stopPropagation()}
@@ -166,24 +164,31 @@ export const VideoLightboxModal: React.FC<VideoLightboxModalProps> = ({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          color: '#ffffff',
+          color: 'var(--color-text-primary)',
           fontSize: 12,
-          padding: '4px 6px',
+          padding: '2px 4px',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span
+            className="card-overlay-pill"
             style={{
               fontWeight: 600,
-              backgroundColor: 'rgba(255, 255, 255, 0.16)',
-              padding: '2px 8px',
-              borderRadius: 12,
+              fontVariantNumeric: 'tabular-nums',
+              padding: '3px 9px',
+              borderRadius: 999,
               fontSize: 11,
             }}
           >
             {currentIndex + 1} / {videos.length}
           </span>
-          <span style={{ color: '#e5e7eb', fontSize: 11 }}>
+          <span
+            style={{
+              color: 'var(--color-text-secondary)',
+              fontSize: 11,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
             {resLabel} • {formatText} • {durText}
             {sizeText ? ` • ${sizeText}` : ''}
           </span>
@@ -191,18 +196,13 @@ export const VideoLightboxModal: React.FC<VideoLightboxModalProps> = ({
 
         <button
           type="button"
+          className="panel-control"
           onClick={onClose}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#ffffff',
-            fontSize: 20,
-            cursor: 'pointer',
-            padding: '2px 8px',
-          }}
+          aria-label="閉じる"
+          style={{ minHeight: 28, width: 28, padding: 0, borderRadius: 999 }}
           title="閉じる (Esc)"
         >
-          ✕
+          <CloseIcon size={14} />
         </button>
       </div>
 
@@ -221,28 +221,16 @@ export const VideoLightboxModal: React.FC<VideoLightboxModalProps> = ({
         {hasPrev && (
           <button
             type="button"
+            className="lightbox-nav-btn"
             onClick={(e) => {
               e.stopPropagation();
               onNavigate(currentIndex - 1);
             }}
-            style={{
-              position: 'absolute',
-              left: 2,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              backgroundColor: 'rgba(255, 255, 255, 0.2)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '50%',
-              width: 34,
-              height: 34,
-              fontSize: 16,
-              cursor: 'pointer',
-              zIndex: 10,
-            }}
+            style={{ left: 2, width: 34, height: 34 }}
+            aria-label="前の動画"
             title="前の動画 (Alt+←)"
           >
-            ◀
+            <ChevronLeftIcon size={17} />
           </button>
         )}
 
@@ -282,22 +270,20 @@ export const VideoLightboxModal: React.FC<VideoLightboxModalProps> = ({
             style={{
               maxWidth: '100%',
               maxHeight: 'calc(100vh - 185px)',
-              borderRadius: 6,
+              borderRadius: 8,
               backgroundColor: '#000000',
-              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)',
+              boxShadow: '0 12px 36px rgba(0, 0, 0, 0.65)',
             }}
           />
 
           {frameNotice && (
             <div
+              className="card-overlay-pill"
               style={{
-                marginTop: 6,
-                padding: '3px 10px',
-                borderRadius: 12,
-                backgroundColor: 'rgba(15, 23, 42, 0.85)',
-                color: '#f8fafc',
+                marginTop: 8,
+                padding: '4px 12px',
+                borderRadius: 999,
                 fontSize: 11,
-                border: '1px solid rgba(255,255,255,0.2)',
               }}
             >
               {frameNotice}
@@ -308,28 +294,16 @@ export const VideoLightboxModal: React.FC<VideoLightboxModalProps> = ({
         {hasNext && (
           <button
             type="button"
+            className="lightbox-nav-btn"
             onClick={(e) => {
               e.stopPropagation();
               onNavigate(currentIndex + 1);
             }}
-            style={{
-              position: 'absolute',
-              right: 2,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              backgroundColor: 'rgba(255, 255, 255, 0.2)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '50%',
-              width: 34,
-              height: 34,
-              fontSize: 16,
-              cursor: 'pointer',
-              zIndex: 10,
-            }}
+            style={{ right: 2, width: 34, height: 34 }}
+            aria-label="次の動画"
             title="次の動画 (Alt+→)"
           >
-            ▶
+            <ChevronRightIcon size={17} />
           </button>
         )}
       </div>
@@ -337,16 +311,8 @@ export const VideoLightboxModal: React.FC<VideoLightboxModalProps> = ({
       {/* Bottom Controls */}
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{
-          backgroundColor: 'rgba(31, 41, 55, 0.92)',
-          borderRadius: 8,
-          padding: '8px 10px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          color: '#ffffff',
-          fontSize: 11,
-        }}
+        className="lightbox-dock"
+        style={{ padding: '9px 11px', fontSize: 11 }}
       >
         {/* Playback Speed, PiP, Frame Capture & Variant Selector */}
         <div
@@ -358,24 +324,17 @@ export const VideoLightboxModal: React.FC<VideoLightboxModalProps> = ({
             gap: 6,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ color: '#9ca3af', fontSize: 10 }}>速度:</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+            <span style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>速度:</span>
             {PLAYBACK_RATES.map((rate) => (
               <button
                 key={rate}
                 type="button"
+                className={`card-action-btn ${
+                  playbackRate === rate ? 'variant-primary-tint' : 'variant-subtle'
+                }`}
                 onClick={() => setPlaybackRate(rate)}
-                style={{
-                  padding: '2px 6px',
-                  fontSize: 10,
-                  borderRadius: 4,
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  backgroundColor:
-                    playbackRate === rate ? '#6366f1' : 'rgba(255,255,255,0.08)',
-                  color: '#ffffff',
-                  cursor: 'pointer',
-                  fontWeight: playbackRate === rate ? 600 : 400,
-                }}
+                style={{ padding: '2px 7px', fontSize: 10, fontVariantNumeric: 'tabular-nums' }}
               >
                 {rate}x
               </button>
@@ -383,51 +342,33 @@ export const VideoLightboxModal: React.FC<VideoLightboxModalProps> = ({
 
             <button
               type="button"
+              className="card-action-btn variant-subtle"
               onClick={handleTogglePip}
-              style={{
-                padding: '2px 7px',
-                fontSize: 10,
-                borderRadius: 4,
-                border: '1px solid rgba(255,255,255,0.2)',
-                backgroundColor: 'rgba(255,255,255,0.1)',
-                color: '#ffffff',
-                cursor: 'pointer',
-              }}
+              style={{ padding: '2px 8px', fontSize: 10 }}
               title="ピクチャーインピクチャー表示"
             >
-              ⧉ PiP
+              <PipIcon size={11} />
+              <span>PiP</span>
             </button>
 
             <button
               type="button"
+              className="card-action-btn variant-subtle"
               onClick={handleCaptureFrame}
-              style={{
-                padding: '2px 8px',
-                fontSize: 10,
-                borderRadius: 4,
-                border: '1px solid rgba(255,255,255,0.25)',
-                backgroundColor: 'rgba(255,255,255,0.12)',
-                color: '#ffffff',
-                cursor: 'pointer',
-              }}
+              style={{ padding: '2px 8px', fontSize: 10 }}
               title="現在表示されている動画フレームを高画質PNG画像として保存します"
             >
-              📸 フレーム保存
+              <CameraIcon size={11} />
+              <span>フレーム保存</span>
             </button>
           </div>
 
           {currentVideo.variants.length > 1 && (
             <select
+              className="filter-select"
               value={selectedUrl}
               onChange={(e) => onSelectVariant(currentVideo.itemId, e.target.value)}
-              style={{
-                fontSize: 10,
-                padding: '3px 6px',
-                borderRadius: 4,
-                backgroundColor: '#111827',
-                color: '#ffffff',
-                border: '1px solid rgba(255,255,255,0.25)',
-              }}
+              style={{ width: 'auto', fontSize: 10, padding: '3px 6px' }}
             >
               {currentVideo.variants.map((v, i) => (
                 <option key={v.url} value={v.url}>
@@ -458,17 +399,20 @@ export const VideoLightboxModal: React.FC<VideoLightboxModalProps> = ({
                 alignItems: 'center',
                 gap: 6,
                 cursor: 'pointer',
+                color: isSelected ? 'var(--color-primary-text)' : 'var(--color-text-primary)',
+                fontWeight: 500,
               }}
             >
               <input
                 type="checkbox"
                 checked={isSelected}
                 onChange={() => onToggleSelect(currentVideo.itemId)}
+                style={{ margin: 0 }}
               />
               <span>選択対象に含める</span>
             </label>
           ) : (
-            <span style={{ color: '#fca5a5', fontSize: 10 }}>
+            <span style={{ color: 'var(--color-danger-text)', fontSize: 10 }}>
               {activeVariant?.blockReason || '直接保存対象外'}
             </span>
           )}
@@ -476,70 +420,44 @@ export const VideoLightboxModal: React.FC<VideoLightboxModalProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <button
               type="button"
+              className={`card-action-btn ${copied ? 'variant-success' : 'variant-subtle'}`}
               onClick={handleCopyUrl}
-              style={{
-                padding: '4px 10px',
-                fontSize: 11,
-                borderRadius: 5,
-                border: '1px solid rgba(255,255,255,0.25)',
-                backgroundColor: 'rgba(255,255,255,0.1)',
-                color: '#ffffff',
-                cursor: 'pointer',
-              }}
+              style={{ padding: '4px 10px', fontSize: 11 }}
             >
-              {copied ? '✓ コピー済' : 'URLコピー'}
+              {copied ? <CheckIcon size={11} /> : <CopyIcon size={11} />}
+              <span>{copied ? 'コピー済' : 'URLコピー'}</span>
             </button>
 
             <button
               type="button"
+              className="card-action-btn variant-subtle"
               onClick={() => chrome.tabs.create({ url: selectedUrl, active: false })}
-              style={{
-                padding: '4px 10px',
-                fontSize: 11,
-                borderRadius: 5,
-                border: '1px solid rgba(255,255,255,0.25)',
-                backgroundColor: 'rgba(255,255,255,0.1)',
-                color: '#ffffff',
-                cursor: 'pointer',
-              }}
+              style={{ padding: '4px 10px', fontSize: 11 }}
             >
-              別タブで開く
+              <ExternalLinkIcon size={11} />
+              <span>別タブで開く</span>
             </button>
 
             {isDownloading ? (
               <button
                 type="button"
+                className="card-action-btn variant-danger"
                 onClick={() => onCancelDownload(currentVideo.itemId)}
-                style={{
-                  padding: '5px 12px',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  borderRadius: 5,
-                  border: 'none',
-                  backgroundColor: '#ef4444',
-                  color: '#ffffff',
-                  cursor: 'pointer',
-                }}
+                style={{ padding: '5px 12px', fontSize: 11 }}
               >
-                ✕ 中止
+                <StopIcon size={10} />
+                <span>中止</span>
               </button>
             ) : (
               canSelectAndSave && (
                 <button
                   type="button"
+                  className="card-action-btn variant-primary-solid"
                   onClick={() => onDownload(currentVideo.itemId)}
-                  style={{
-                    padding: '5px 12px',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    borderRadius: 5,
-                    border: 'none',
-                    backgroundColor: '#6366f1',
-                    color: '#ffffff',
-                    cursor: 'pointer',
-                  }}
+                  style={{ padding: '5px 12px', fontSize: 11 }}
                 >
-                  📥 動画を保存
+                  <DownloadIcon size={12} />
+                  <span>動画を保存</span>
                 </button>
               )
             )}

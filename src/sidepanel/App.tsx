@@ -5,6 +5,7 @@ import { DownloadFooter } from './components/DownloadFooter';
 import { EmptyOrStatusView } from './components/EmptyOrStatusView';
 import { FilterBar } from './components/FilterBar';
 import { Header } from './components/Header';
+import { SlidersIcon } from './components/Icons';
 import { ImageGrid } from './components/ImageGrid';
 import { ImageLightboxModal } from './components/ImageLightboxModal';
 import { MediaModeTabs } from './components/MediaModeTabs';
@@ -197,22 +198,7 @@ export function App() {
   }
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        width: '100%',
-        margin: 0,
-        padding: 0,
-        boxSizing: 'border-box',
-        backgroundColor: 'var(--color-bg-app)',
-        color: 'var(--color-text-primary)',
-        fontFamily:
-          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-        overflow: 'hidden',
-      }}
-    >
+    <div className="app-shell">
       <Header
         domain={snapshot?.domain}
         pageTitle={snapshot?.pageTitle}
@@ -241,7 +227,8 @@ export function App() {
               aria-expanded={optionsOpen}
               onClick={() => setOptionsOpen((open) => !open)}
             >
-              フィルター・設定
+              <SlidersIcon size={11} />
+              <span>フィルター・設定</span>
             </button>
           </div>
 

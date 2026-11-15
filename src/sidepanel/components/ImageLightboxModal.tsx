@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import type { ImageItem, ItemDownloadState } from '@shared/types';
+import {
+  CheckIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CloseIcon,
+  CopyIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+} from './Icons';
 
 interface ImageLightboxModalProps {
   items: ImageItem[];
@@ -18,7 +27,6 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
   items,
   currentIndex,
   isSelected,
-  downloadState,
   onClose,
   onNavigate,
   onToggleSelect,
@@ -80,21 +88,7 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
   };
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1000,
-        backgroundColor: 'rgba(0, 0, 0, 0.88)',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        padding: '12px',
-        boxSizing: 'border-box',
-        backdropFilter: 'blur(3px)',
-      }}
-    >
+    <div onClick={onClose} className="lightbox-backdrop">
       {/* Header Bar */}
       <div
         onClick={(e) => e.stopPropagation()}
@@ -102,44 +96,44 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          color: '#ffffff',
+          color: 'var(--color-text-primary)',
           fontSize: 12,
-          padding: '4px 6px',
+          padding: '2px 4px',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span
+            className="card-overlay-pill"
             style={{
               fontWeight: 600,
-              backgroundColor: 'rgba(255, 255, 255, 0.15)',
-              padding: '2px 8px',
-              borderRadius: 12,
+              fontVariantNumeric: 'tabular-nums',
+              padding: '3px 9px',
+              borderRadius: 999,
               fontSize: 11,
             }}
           >
             {currentIndex + 1} / {items.length}
           </span>
-          <span style={{ color: '#d1d5db', fontSize: 11 }}>
+          <span
+            style={{
+              color: 'var(--color-text-secondary)',
+              fontSize: 11,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
             {dimsText} • {formatText}
           </span>
         </div>
 
         <button
           type="button"
+          className="panel-control"
           onClick={onClose}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#ffffff',
-            fontSize: 20,
-            cursor: 'pointer',
-            padding: '2px 8px',
-            lineHeight: 1,
-            borderRadius: 4,
-          }}
+          aria-label="閉じる"
+          style={{ minHeight: 28, width: 28, padding: 0, borderRadius: 999 }}
           title="閉じる (Esc)"
         >
-          ✕
+          <CloseIcon size={14} />
         </button>
       </div>
 
@@ -159,32 +153,16 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
         {hasPrev && (
           <button
             type="button"
+            className="lightbox-nav-btn"
             onClick={(e) => {
               e.stopPropagation();
               onNavigate(currentIndex - 1);
             }}
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              backgroundColor: 'rgba(255, 255, 255, 0.2)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '50%',
-              width: 38,
-              height: 38,
-              fontSize: 18,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 10,
-              transition: 'background-color 0.15s ease',
-            }}
+            style={{ left: 2 }}
+            aria-label="前の画像"
             title="前の画像 (←)"
           >
-            ◀
+            <ChevronLeftIcon size={18} />
           </button>
         )}
 
@@ -204,7 +182,11 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
             alt="Preview"
             onLoad={(event) => {
               const { naturalWidth, naturalHeight } = event.currentTarget;
-              if (naturalWidth > 0 && naturalHeight > 0 && (!activeVariant?.naturalWidth || !activeVariant?.naturalHeight)) {
+              if (
+                naturalWidth > 0 &&
+                naturalHeight > 0 &&
+                (!activeVariant?.naturalWidth || !activeVariant?.naturalHeight)
+              ) {
                 onReportDimensions(currentItem.itemId, selectedUrl, naturalWidth, naturalHeight);
               }
             }}
@@ -212,8 +194,8 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
               maxWidth: '94%',
               maxHeight: 'calc(100vh - 180px)',
               objectFit: 'contain',
-              borderRadius: 6,
-              boxShadow: '0 8px 30px rgba(0, 0, 0, 0.5)',
+              borderRadius: 8,
+              boxShadow: '0 12px 36px rgba(0, 0, 0, 0.65)',
             }}
           />
         </div>
@@ -222,49 +204,22 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
         {hasNext && (
           <button
             type="button"
+            className="lightbox-nav-btn"
             onClick={(e) => {
               e.stopPropagation();
               onNavigate(currentIndex + 1);
             }}
-            style={{
-              position: 'absolute',
-              right: 0,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              backgroundColor: 'rgba(255, 255, 255, 0.2)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '50%',
-              width: 38,
-              height: 38,
-              fontSize: 18,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 10,
-              transition: 'background-color 0.15s ease',
-            }}
+            style={{ right: 2 }}
+            aria-label="次の画像"
             title="次の画像 (→)"
           >
-            ▶
+            <ChevronRightIcon size={18} />
           </button>
         )}
       </div>
 
       {/* Footer Controls */}
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          backgroundColor: 'rgba(30, 30, 30, 0.95)',
-          borderRadius: 8,
-          padding: '10px 14px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          color: '#ffffff',
-        }}
-      >
+      <div onClick={(e) => e.stopPropagation()} className="lightbox-dock">
         {/* Action Row */}
         <div
           style={{
@@ -280,11 +235,11 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 6,
+              gap: 7,
               cursor: onToggleSelect ? 'pointer' : 'default',
               fontSize: 12,
               fontWeight: 600,
-              color: checked ? 'var(--color-primary-text)' : '#ffffff',
+              color: checked ? 'var(--color-primary-text)' : 'var(--color-text-primary)',
             }}
           >
             <input
@@ -292,62 +247,45 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
               checked={checked}
               disabled={!onToggleSelect}
               onChange={() => onToggleSelect?.(currentItem.itemId)}
-              style={{ width: 16, height: 16 }}
+              style={{ width: 15, height: 15, margin: 0 }}
             />
-            <span>{checked ? '✓ 選択中' : onToggleSelect ? '選択する (Space)' : '寸法の確認が必要です'}</span>
+            <span>
+              {checked ? '選択中' : onToggleSelect ? '選択する (Space)' : '寸法の確認が必要です'}
+            </span>
           </label>
 
           {/* Action Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <button
               type="button"
+              className="card-action-btn variant-primary-solid"
               onClick={() => onDownload(currentItem.itemId)}
-              style={{
-                padding: '5px 12px',
-                fontSize: 11,
-                fontWeight: 600,
-                backgroundColor: 'var(--color-primary)',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: 4,
-                cursor: 'pointer',
-              }}
+              style={{ padding: '5px 12px', fontSize: 11 }}
             >
-              保存する
+              <DownloadIcon size={12} />
+              <span>保存する</span>
             </button>
 
             <button
               type="button"
+              className="card-action-btn variant-subtle"
               onClick={handleOpenOriginal}
-              style={{
-                padding: '5px 10px',
-                fontSize: 11,
-                backgroundColor: '#374151',
-                color: '#ffffff',
-                border: '1px solid #4b5563',
-                borderRadius: 4,
-                cursor: 'pointer',
-              }}
+              style={{ padding: '5px 10px', fontSize: 11 }}
               title="新しいタブで画像を開く"
             >
-              別タブで開く
+              <ExternalLinkIcon size={11} />
+              <span>別タブで開く</span>
             </button>
 
             <button
               type="button"
+              className={`card-action-btn ${copied ? 'variant-success' : 'variant-subtle'}`}
               onClick={handleCopyUrl}
-              style={{
-                padding: '5px 10px',
-                fontSize: 11,
-                backgroundColor: copied ? '#065f46' : '#374151',
-                color: '#ffffff',
-                border: '1px solid #4b5563',
-                borderRadius: 4,
-                cursor: 'pointer',
-              }}
+              style={{ padding: '5px 10px', fontSize: 11 }}
               title="URLをコピー"
             >
-              {copied ? 'コピー完了' : 'URLコピー'}
+              {copied ? <CheckIcon size={11} /> : <CopyIcon size={11} />}
+              <span>{copied ? 'コピー完了' : 'URLコピー'}</span>
             </button>
           </div>
         </div>
@@ -355,19 +293,12 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
         {/* Variant selector dropdown if multiple candidates exist */}
         {currentItem.variants.length > 1 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
-            <span style={{ color: '#9ca3af', whiteSpace: 'nowrap' }}>候補:</span>
+            <span style={{ color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>候補:</span>
             <select
+              className="filter-select"
               value={selectedUrl}
               onChange={(e) => onSelectVariant(currentItem.itemId, e.target.value)}
-              style={{
-                flex: 1,
-                fontSize: 11,
-                padding: '3px 6px',
-                backgroundColor: '#1f2937',
-                color: '#ffffff',
-                border: '1px solid #4b5563',
-                borderRadius: 4,
-              }}
+              style={{ flex: 1, fontSize: 11, padding: '4px 7px' }}
             >
               {currentItem.variants.map((v, idx) => {
                 const desc = v.descriptors.length > 0 ? ` (${v.descriptors.join(', ')})` : '';
@@ -378,7 +309,8 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
                     : `候補 ${idx + 1}`;
                 return (
                   <option key={v.url} value={v.url}>
-                    {roleLabel} {desc} ({v.naturalWidth ? `${v.naturalWidth}×${v.naturalHeight}` : v.format})
+                    {roleLabel} {desc} (
+                    {v.naturalWidth ? `${v.naturalWidth}×${v.naturalHeight}` : v.format})
                   </option>
                 );
               })}
@@ -387,8 +319,8 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
         )}
 
         {/* Keyboard Shortcut Hint */}
-        <div style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center' }}>
-          キー操作: ◀ / ▶ 前後移動 • Space 選択切替 • Esc 閉じる
+        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', textAlign: 'center' }}>
+          キー操作: ← / → 前後移動 • Space 選択切替 • Esc 閉じる
         </div>
       </div>
     </div>

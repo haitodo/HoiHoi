@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ScanStatus } from '@shared/types';
+import { PinIcon, RefreshIcon, UnlockTrackIcon } from './Icons';
 
 interface HeaderProps {
   domain?: string;
@@ -31,50 +32,26 @@ export const Header: React.FC<HeaderProps> = ({
   onTogglePin,
 }) => {
   const statusLabel = SCAN_STATUS_LABELS[scanStatus];
-  const statusTitle = statusMessage || (scanStatus === 'watching'
-    ? '監視中 (スクロールで自動追加)'
-    : statusLabel);
+  const statusTitle =
+    statusMessage || (scanStatus === 'watching' ? '監視中 (スクロールで自動追加)' : statusLabel);
 
   return (
-    <header
-      style={{
-        padding: '4px 8px',
-        borderBottom: '1px solid var(--color-border)',
-        backgroundColor: 'var(--color-bg-surface)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 6,
-        flexShrink: 0,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-        <img
-          src="icons/icon-48.png"
-          alt=""
-          style={{ width: 18, height: 18, borderRadius: 4, flexShrink: 0 }}
-        />
+    <header className="panel-header">
+      <div className="panel-header-brand">
+        <img src="icons/icon-48.png" alt="" className="panel-header-icon" />
         <span
-          style={{
-            fontWeight: 600,
-            fontSize: 12,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
+          className="panel-header-title"
           title={pageTitle && domain ? `${pageTitle} (${domain})` : pageTitle || domain || 'HoiHoi'}
         >
           {pageTitle || domain || 'HoiHoi'}
         </span>
-        <span
-          style={{ fontSize: 10, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}
-          title={statusTitle}
-        >
-          {statusLabel}
+        <span className={`panel-status-pill status-${scanStatus}`} title={statusTitle}>
+          <span className="panel-status-dot" aria-hidden="true" />
+          <span>{statusLabel}</span>
         </span>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div className="panel-header-actions">
         {onTogglePin && (
           <button
             type="button"
@@ -87,7 +64,8 @@ export const Header: React.FC<HeaderProps> = ({
                 : 'タブ追従中: ブラウザのアクティブタブに合わせて表示を切り替えます（クリックで現在のタブに固定）'
             }
           >
-            {isPinned ? '📌 固定中' : '🔓 追従中'}
+            {isPinned ? <PinIcon size={11} /> : <UnlockTrackIcon size={11} />}
+            <span>{isPinned ? '固定中' : '追従中'}</span>
           </button>
         )}
 
@@ -98,7 +76,8 @@ export const Header: React.FC<HeaderProps> = ({
           disabled={scanStatus === 'restricted'}
           title="ページを再スキャンして新しい画像を統合します"
         >
-          再スキャン
+          <RefreshIcon size={11} />
+          <span>再スキャン</span>
         </button>
       </div>
     </header>

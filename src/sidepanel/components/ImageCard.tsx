@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
 import type { CardSize, ImageItem, ItemDownloadState } from '@shared/types';
+import {
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  ExpandIcon,
+  ExternalLinkIcon,
+} from './Icons';
 
 interface ImageCardProps {
   item: ImageItem;
@@ -35,10 +42,14 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   const activeVariant =
     item.variants.find((v) => v.url === item.selectedUrl) || item.variants[0];
   const selectedUrl = item.selectedUrl;
-  const thumbnailVariant = item.variants.find((variant) => variant.url === item.primaryUrl && !variant.largeDataRefId)
-    ?? item.variants.find((variant) => !variant.largeDataRefId && variant.roles.some((role) =>
-      role === 'src' || role === 'current-src' || role === 'lazy-attr'))
-    ?? activeVariant;
+  const thumbnailVariant =
+    item.variants.find((variant) => variant.url === item.primaryUrl && !variant.largeDataRefId) ??
+    item.variants.find(
+      (variant) =>
+        !variant.largeDataRefId &&
+        variant.roles.some((role) => role === 'src' || role === 'current-src' || role === 'lazy-attr'),
+    ) ??
+    activeVariant;
   const previewUrl = useThumbnailFallback
     ? selectedUrl
     : (thumbnailVariant?.url ?? selectedUrl);
@@ -73,41 +84,35 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   const formatText = activeVariant?.format.toUpperCase() || 'UNKNOWN';
   const checked = canSelect && isSelected;
 
+  const downloadStatusClass =
+    downloadState?.status === 'completed'
+      ? 'status-completed'
+      : downloadState?.status === 'in_progress' || downloadState?.status === 'starting'
+        ? 'status-active'
+        : downloadState?.status === 'failed'
+          ? 'status-failed'
+          : 'status-muted';
+
   return (
     <div
+      className={`media-card ${canSelect ? 'is-selectable' : ''} ${checked ? 'is-selected' : ''}`}
       onClick={canSelect ? onToggleSelect : undefined}
       onDoubleClick={(e) => {
         e.stopPropagation();
         onOpenPreview?.();
       }}
-      style={{
-        border: `2px solid ${checked ? 'var(--color-primary)' : 'var(--color-border)'}`,
-        borderRadius: 8,
-        backgroundColor: 'var(--color-card-bg)',
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        boxSizing: 'border-box',
-        cursor: canSelect ? 'pointer' : 'default',
-        position: 'relative',
-        transition: 'border-color 0.15s ease',
-      }}
     >
       {/* Selection Checkbox (Top Left) */}
       <div
+        className="card-overlay-pill"
         style={{
           position: 'absolute',
           top: 6,
           left: 6,
           zIndex: 2,
-          backgroundColor: 'var(--color-overlay-bg)',
-          border: '1px solid var(--color-overlay-border)',
-          borderRadius: 4,
-          padding: '2px 4px',
+          padding: '3px 4px',
           display: 'flex',
           alignItems: 'center',
-          backdropFilter: 'blur(4px)',
         }}
         onClick={(e) => {
           e.stopPropagation();
@@ -129,88 +134,28 @@ export const ImageCard: React.FC<ImageCardProps> = ({
       {onOpenPreview && (
         <button
           type="button"
+          className="card-overlay-pill card-preview-btn"
+          aria-label="拡大プレビュー"
           onClick={(e) => {
             e.stopPropagation();
             onOpenPreview();
           }}
-          style={{
-            position: 'absolute',
-            top: 6,
-            right: item.occurrenceCount > 1 ? 38 : 6,
-            zIndex: 3,
-            backgroundColor: 'var(--color-overlay-bg)',
-            border: '1px solid var(--color-overlay-border)',
-            color: 'var(--color-text-primary)',
-            borderRadius: 4,
-            padding: '2px 5px',
-            fontSize: 10,
-            lineHeight: 1,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.2)',
-            backdropFilter: 'blur(4px)',
-          }}
+          style={{ right: item.occurrenceCount > 1 ? 38 : 6 }}
           title="クリックで拡大プレビューを開く（ダブルクリックでも可）"
         >
-          🔍
+          <ExpandIcon size={11} />
         </button>
       )}
 
       {/* Occurrence Badge (Top Right) */}
       {item.occurrenceCount > 1 && (
         <span
-          style={{
-            position: 'absolute',
-            top: 6,
-            right: 6,
-            zIndex: 2,
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
-            color: '#ffffff',
-            fontSize: 10,
-            padding: '1px 5px',
-            borderRadius: 8,
-            fontWeight: 500,
-          }}
+          className="card-occurrence-badge"
+          style={{ position: 'absolute', top: 6, right: 6, zIndex: 2 }}
           title={`ページ内で ${item.occurrenceCount} 箇所に出現`}
         >
           ×{item.occurrenceCount}
         </span>
-      )}
-
-      {/* Download Status Badge */}
-      {downloadState && downloadState.status !== 'idle' && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 60,
-            left: 6,
-            right: 6,
-            zIndex: 2,
-            padding: '2px 6px',
-            borderRadius: 4,
-            fontSize: 10,
-            textAlign: 'center',
-            fontWeight: 600,
-            color: '#ffffff',
-            backgroundColor:
-              downloadState.status === 'completed'
-                ? '#10b981'
-                : downloadState.status === 'in_progress' || downloadState.status === 'starting'
-                  ? '#3b82f6'
-                  : downloadState.status === 'failed'
-                    ? '#ef4444'
-                    : '#6b7280',
-          }}
-        >
-          {downloadState.status === 'completed' && '保存完了'}
-          {downloadState.status === 'in_progress' && 'ダウンロード中'}
-          {downloadState.status === 'starting' && '開始処理中'}
-          {downloadState.status === 'queued' && '待機中'}
-          {downloadState.status === 'failed' && (downloadState.errorMessage || '保存失敗')}
-          {downloadState.status === 'canceled' && 'キャンセル'}
-        </div>
       )}
 
       {/* Thumbnail Area */}
@@ -221,6 +166,8 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             ? { minHeight: 160, maxHeight: thumbnailHeight }
             : { height: thumbnailHeight }),
           backgroundColor: 'var(--color-thumb-bg)',
+          borderBottom: '1px solid var(--color-border)',
+          position: 'relative',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -284,12 +231,24 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             }
           />
         )}
+
+        {/* Download Status Badge (Anchored cleanly inside thumbnail stage) */}
+        {downloadState && downloadState.status !== 'idle' && (
+          <div className={`card-download-pill ${downloadStatusClass}`}>
+            {downloadState.status === 'completed' && '保存完了'}
+            {downloadState.status === 'in_progress' && 'ダウンロード中'}
+            {downloadState.status === 'starting' && '開始処理中'}
+            {downloadState.status === 'queued' && '待機中'}
+            {downloadState.status === 'failed' && (downloadState.errorMessage || '保存失敗')}
+            {downloadState.status === 'canceled' && 'キャンセル'}
+          </div>
+        )}
       </div>
 
       {/* Card Info and Actions */}
       <div
         style={{
-          padding: cardSize === 'small' ? '4px 6px' : '6px 8px',
+          padding: cardSize === 'small' ? '5px 6px' : '7px 8px',
           fontSize: 11,
           backgroundColor: 'var(--color-card-bg)',
           display: 'flex',
@@ -307,9 +266,10 @@ export const ImageCard: React.FC<ImageCardProps> = ({
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              color: 'var(--color-text-muted)',
+              color: 'var(--color-text-secondary)',
               fontSize: cardSize === 'small' ? 9 : 10,
-              marginBottom: 4,
+              fontVariantNumeric: 'tabular-nums',
+              marginBottom: 5,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               lineHeight: 1.2,
@@ -328,7 +288,8 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             <span
               style={{
                 fontWeight: 600,
-                color: 'var(--color-text-primary)',
+                color: 'var(--color-text-muted)',
+                letterSpacing: '0.03em',
                 marginLeft: 4,
                 flexShrink: 0,
                 whiteSpace: 'nowrap',
@@ -340,20 +301,12 @@ export const ImageCard: React.FC<ImageCardProps> = ({
 
           {/* Variant selector dropdown if item has multiple candidates */}
           {item.variants.length > 1 && (
-            <div style={{ marginBottom: 4 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ marginBottom: 5 }} onClick={(e) => e.stopPropagation()}>
               <select
+                className="card-variant-select"
                 value={selectedUrl}
                 onChange={(e) => onSelectVariant(e.target.value)}
-                style={{
-                  width: '100%',
-                  fontSize: cardSize === 'small' ? 9 : 10,
-                  padding: '1px 3px',
-                  border: '1px solid var(--color-border-input)',
-                  borderRadius: 4,
-                  backgroundColor: 'var(--color-bg-surface)',
-                  color: 'var(--color-text-primary)',
-                  cursor: 'pointer',
-                }}
+                style={{ fontSize: cardSize === 'small' ? 9 : 10 }}
               >
                 {item.variants.map((v, idx) => {
                   const desc = v.descriptors.length > 0 ? ` (${v.descriptors.join(', ')})` : '';
@@ -387,116 +340,69 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           }}
         >
           {cardSize === 'small' ? (
-            // Small mode: 2 compact buttons to prevent text wrapping and vertical expansion
             <>
               <button
                 type="button"
+                className="card-action-btn variant-primary-tint"
                 onClick={handleDownloadClick}
                 style={{
                   flex: 1,
                   minWidth: 0,
-                  padding: '3px 2px',
+                  padding: '3px 4px',
                   fontSize: 10,
-                  backgroundColor: 'var(--color-primary-subtle)',
-                  color: 'var(--color-primary-text)',
-                  border: '1px solid var(--color-primary-subtle-border)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
                   lineHeight: 1.2,
                 }}
                 title="この画像を保存"
               >
-                保存
+                <DownloadIcon size={10} />
+                <span>保存</span>
               </button>
 
               <button
                 type="button"
+                className="card-action-btn variant-subtle"
                 onClick={handleOpenOriginal}
-                style={{
-                  flexShrink: 0,
-                  padding: '3px 6px',
-                  fontSize: 10,
-                  backgroundColor: 'var(--color-bg-subtle)',
-                  color: 'var(--color-text-primary)',
-                  border: '1px solid var(--color-border-input)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  lineHeight: 1.2,
-                }}
+                style={{ flexShrink: 0, padding: '3px 5px', fontSize: 10, lineHeight: 1.2 }}
+                aria-label="新しいタブで画像を開く"
                 title="新しいタブで画像を開く"
               >
-                ↗
+                <ExternalLinkIcon size={10} />
               </button>
             </>
           ) : cardSize === 'large' ? (
-            // Large mode: Spacious bar with all 4 actions labeled
             <>
               <button
                 type="button"
+                className="card-action-btn variant-primary-tint"
                 onClick={handleDownloadClick}
-                style={{
-                  flex: 1.2,
-                  minWidth: 0,
-                  padding: '5px 8px',
-                  fontSize: 11,
-                  backgroundColor: 'var(--color-primary-subtle)',
-                  color: 'var(--color-primary-text)',
-                  border: '1px solid var(--color-primary-subtle-border)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
+                style={{ flex: 1.2, minWidth: 0, padding: '5px 8px', fontSize: 11 }}
                 title="この画像を保存"
               >
-                💾 保存
+                <DownloadIcon size={12} />
+                <span>保存</span>
               </button>
 
               {onOpenPreview && (
                 <button
                   type="button"
+                  className="card-action-btn variant-subtle"
                   onClick={(e) => {
                     e.stopPropagation();
                     onOpenPreview();
                   }}
-                  style={{
-                    flexShrink: 0,
-                    padding: '5px 8px',
-                    fontSize: 11,
-                    backgroundColor: 'var(--color-bg-subtle)',
-                    color: 'var(--color-text-primary)',
-                    border: '1px solid var(--color-border-input)',
-                    borderRadius: 4,
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                  }}
+                  style={{ flexShrink: 0, padding: '5px 8px', fontSize: 11 }}
                   title="拡大プレビュー（前後の送り確認も可能）"
                 >
-                  🔍 拡大
+                  <ExpandIcon size={11} />
+                  <span>拡大</span>
                 </button>
               )}
 
               <button
                 type="button"
+                className="card-action-btn variant-subtle"
                 onClick={handleOpenOriginal}
-                style={{
-                  flexShrink: 0,
-                  padding: '5px 8px',
-                  fontSize: 11,
-                  backgroundColor: 'var(--color-bg-subtle)',
-                  color: 'var(--color-text-primary)',
-                  border: '1px solid var(--color-border-input)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
+                style={{ flexShrink: 0, padding: '5px 8px', fontSize: 11 }}
                 title="新しいタブで画像を開く"
               >
                 別タブ
@@ -504,71 +410,39 @@ export const ImageCard: React.FC<ImageCardProps> = ({
 
               <button
                 type="button"
+                className={`card-action-btn ${copied ? 'variant-success' : 'variant-subtle'}`}
                 onClick={handleCopyUrl}
-                style={{
-                  flexShrink: 0,
-                  padding: '5px 8px',
-                  fontSize: 11,
-                  backgroundColor: copied
-                    ? 'var(--color-success-subtle)'
-                    : 'var(--color-bg-subtle)',
-                  color: copied
-                    ? 'var(--color-success-text)'
-                    : 'var(--color-text-primary)',
-                  border: copied
-                    ? '1px solid var(--color-success-border)'
-                    : '1px solid var(--color-border-input)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
+                style={{ flexShrink: 0, padding: '5px 8px', fontSize: 11 }}
                 title="画像URLをクリップボードにコピー"
               >
-                {copied ? 'コピー済' : 'コピー'}
+                {copied ? <CheckIcon size={11} /> : <CopyIcon size={11} />}
+                <span>{copied ? 'コピー済' : 'コピー'}</span>
               </button>
             </>
           ) : (
-            // Medium / Auto mode: Clean 3-button layout (Preview is in top-right 🔍)
             <>
               <button
                 type="button"
+                className="card-action-btn variant-primary-tint"
                 onClick={handleDownloadClick}
                 style={{
                   flex: 1,
                   minWidth: 0,
-                  padding: '3px 4px',
+                  padding: '4px 5px',
                   fontSize: 10,
-                  backgroundColor: 'var(--color-primary-subtle)',
-                  color: 'var(--color-primary-text)',
-                  border: '1px solid var(--color-primary-subtle-border)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
                   lineHeight: 1.2,
                 }}
                 title="この画像を保存"
               >
-                保存
+                <DownloadIcon size={10} />
+                <span>保存</span>
               </button>
 
               <button
                 type="button"
+                className="card-action-btn variant-subtle"
                 onClick={handleOpenOriginal}
-                style={{
-                  flexShrink: 0,
-                  padding: '3px 6px',
-                  fontSize: 10,
-                  backgroundColor: 'var(--color-bg-subtle)',
-                  color: 'var(--color-text-primary)',
-                  border: '1px solid var(--color-border-input)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  lineHeight: 1.2,
-                }}
+                style={{ flexShrink: 0, padding: '4px 6px', fontSize: 10, lineHeight: 1.2 }}
                 title="新しいタブで画像を開く"
               >
                 開く
@@ -576,25 +450,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
 
               <button
                 type="button"
+                className={`card-action-btn ${copied ? 'variant-success' : 'variant-subtle'}`}
                 onClick={handleCopyUrl}
-                style={{
-                  flexShrink: 0,
-                  padding: '3px 6px',
-                  fontSize: 10,
-                  backgroundColor: copied
-                    ? 'var(--color-success-subtle)'
-                    : 'var(--color-bg-subtle)',
-                  color: copied
-                    ? 'var(--color-success-text)'
-                    : 'var(--color-text-primary)',
-                  border: copied
-                    ? '1px solid var(--color-success-border)'
-                    : '1px solid var(--color-border-input)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  lineHeight: 1.2,
-                }}
+                style={{ flexShrink: 0, padding: '4px 6px', fontSize: 10, lineHeight: 1.2 }}
                 title="画像URLをクリップボードにコピー"
               >
                 {copied ? '済' : 'コピー'}

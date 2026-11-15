@@ -1,5 +1,6 @@
 import React from 'react';
 import type { MediaMode, ScanStatus } from '@shared/types';
+import { RefreshIcon } from './Icons';
 
 interface EmptyOrStatusViewProps {
   mediaMode?: MediaMode;
@@ -23,16 +24,27 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
   let title = '';
   let description = '';
   let action: React.ReactNode = null;
-
   let bannerIcon: React.ReactNode = null;
 
   if (scanStatus === 'unscanned') {
     bannerIcon = (
-      <img
-        src="icons/icon-128.png"
-        alt="HoiHoi"
-        style={{ width: 64, height: 64, borderRadius: 16, marginBottom: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
-      />
+      <div
+        style={{
+          padding: 10,
+          borderRadius: 20,
+          background:
+            'radial-gradient(circle at 50% 35%, rgba(59, 130, 246, 0.18), rgba(20, 22, 27, 0.6))',
+          border: '1px solid var(--color-border-strong)',
+          marginBottom: 16,
+          boxShadow: '0 8px 28px rgba(0, 0, 0, 0.45)',
+        }}
+      >
+        <img
+          src="icons/icon-128.png"
+          alt="HoiHoi"
+          style={{ width: 52, height: 52, borderRadius: 12, display: 'block' }}
+        />
+      </div>
     );
     title = 'このタブは未スキャンです';
     description =
@@ -40,21 +52,13 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
     if (onRescan) {
       action = (
         <button
+          type="button"
+          className="panel-control panel-control-primary"
           onClick={onRescan}
-          style={{
-            marginTop: 14,
-            padding: '8px 18px',
-            fontSize: 13,
-            backgroundColor: 'var(--color-primary)',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: 6,
-            cursor: 'pointer',
-            fontWeight: 600,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-          }}
+          style={{ marginTop: 16, padding: '8px 18px', fontSize: 12, borderRadius: 7 }}
         >
-          スキャンを開始する
+          <RefreshIcon size={13} />
+          <span>スキャンを開始する</span>
         </button>
       );
     }
@@ -71,20 +75,13 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
     if (onRescan) {
       action = (
         <button
+          type="button"
+          className="panel-control panel-control-primary"
           onClick={onRescan}
-          style={{
-            marginTop: 12,
-            padding: '6px 14px',
-            fontSize: 12,
-            backgroundColor: 'var(--color-primary)',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: 6,
-            cursor: 'pointer',
-            fontWeight: 500,
-          }}
+          style={{ marginTop: 14, padding: '7px 14px', fontSize: 12 }}
         >
-          再スキャンを試行
+          <RefreshIcon size={12} />
+          <span>再スキャンを試行</span>
         </button>
       );
     }
@@ -94,17 +91,10 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
     if (onClearFilter) {
       action = (
         <button
+          type="button"
+          className="panel-control"
           onClick={onClearFilter}
-          style={{
-            marginTop: 12,
-            padding: '5px 12px',
-            fontSize: 12,
-            backgroundColor: 'var(--color-bg-subtle)',
-            color: 'var(--color-text-primary)',
-            border: '1px solid var(--color-border-input)',
-            borderRadius: 6,
-            cursor: 'pointer',
-          }}
+          style={{ marginTop: 14, padding: '6px 14px', fontSize: 12 }}
         >
           フィルターをクリア
         </button>
@@ -128,7 +118,7 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 30,
+        padding: 28,
         textAlign: 'center',
         color: 'var(--color-text-muted)',
       }}
@@ -140,6 +130,7 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
           fontWeight: 600,
           color: 'var(--color-text-primary)',
           margin: '0 0 8px',
+          letterSpacing: '-0.01em',
         }}
       >
         {title}
@@ -147,7 +138,7 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
       <p
         style={{
           fontSize: 12,
-          lineHeight: 1.5,
+          lineHeight: 1.6,
           margin: 0,
           maxWidth: 300,
           color: 'var(--color-text-secondary)',

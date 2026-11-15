@@ -32,7 +32,7 @@ interface VideoGridProps {
   onOpenPreview?: (video: VideoItem) => void;
 }
 
-const CARD_GAP = 10;
+const CARD_GAP = 8;
 
 const VIDEO_STAGE_HEIGHTS: Record<CardSize, number> = {
   large: 230,
@@ -153,7 +153,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
           minHeight: 0,
           overflowY: 'auto',
           overflowX: 'hidden',
-          padding: '8px 10px',
+          padding: '8px 8px',
           position: 'relative',
           boxSizing: 'border-box',
         }}

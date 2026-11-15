@@ -17,7 +17,7 @@ interface ImageGridProps {
   onOpenPreview?: (item: ImageItem) => void;
 }
 
-const CARD_GAP = 10;
+const CARD_GAP = 8;
 
 const THUMBNAIL_HEIGHTS: Record<CardSize, number> = {
   large: 460,
@@ -129,7 +129,7 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
           minHeight: 0,
           overflowY: 'auto',
           overflowX: 'hidden',
-          padding: '8px 6px 8px 8px',
+          padding: '8px 8px',
           position: 'relative',
           boxSizing: 'border-box',
         }}

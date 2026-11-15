@@ -45,45 +45,26 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   );
 
   return (
-    <div
-      style={{
-        padding: '8px 10px',
-        backgroundColor: 'var(--color-bg-subtle)',
-        borderBottom: '1px solid var(--color-border)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-      }}
-    >
+    <div className="filter-section">
       {/* Search Input */}
       <div>
         <input
           type="text"
+          className="filter-input"
           aria-label="画像URLで絞り込み"
           placeholder="URL部分一致で絞り込み..."
           value={filter.urlQuery}
           onChange={(e) => onChange({ ...filter, urlQuery: e.target.value })}
-          style={{
-            width: '100%',
-            padding: '5px 8px',
-            fontSize: 12,
-            border: '1px solid var(--color-border-input)',
-            borderRadius: 6,
-            boxSizing: 'border-box',
-            backgroundColor: 'var(--color-bg-surface)',
-            color: 'var(--color-text-primary)',
-          }}
         />
       </div>
 
       {/* Dimension Filters & Sort Order */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 70px' }}>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-            最小幅:
-          </span>
+      <div className="filter-row">
+        <div className="filter-field">
+          <span className="filter-field-label">最小幅:</span>
           <input
             type="number"
+            className="filter-input"
             aria-label="最小幅"
             min="0"
             step="10"
@@ -95,25 +76,14 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 minWidth: e.target.value ? Math.max(0, Number(e.target.value)) : null,
               })
             }
-            style={{
-              width: '100%',
-              minWidth: 0,
-              padding: '4px 6px',
-              fontSize: 11,
-              border: '1px solid var(--color-border-input)',
-              borderRadius: 4,
-              backgroundColor: 'var(--color-bg-surface)',
-              color: 'var(--color-text-primary)',
-            }}
           />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 70px' }}>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-            最小高:
-          </span>
+        <div className="filter-field">
+          <span className="filter-field-label">最小高:</span>
           <input
             type="number"
+            className="filter-input"
             aria-label="最小高"
             min="0"
             step="10"
@@ -125,39 +95,17 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 minHeight: e.target.value ? Math.max(0, Number(e.target.value)) : null,
               })
             }
-            style={{
-              width: '100%',
-              minWidth: 0,
-              padding: '4px 6px',
-              fontSize: 11,
-              border: '1px solid var(--color-border-input)',
-              borderRadius: 4,
-              backgroundColor: 'var(--color-bg-surface)',
-              color: 'var(--color-text-primary)',
-            }}
           />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1.2 1 125px' }}>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-            並び順:
-          </span>
+        <div className="filter-field" style={{ flex: '1.2 1 125px' }}>
+          <span className="filter-field-label">並び順:</span>
           <select
+            className="filter-select"
             aria-label="並び順"
             value={sortOrder}
             onChange={(e) => onSortChange(e.target.value as SortOrder)}
-            style={{
-              width: '100%',
-              minWidth: 0,
-              padding: '4px 6px',
-              fontSize: 11,
-              border: '1px solid var(--color-border-input)',
-              borderRadius: 4,
-              backgroundColor: 'var(--color-bg-surface)',
-              color: 'var(--color-text-primary)',
-              cursor: 'pointer',
-              fontWeight: 500,
-            }}
+            style={{ fontWeight: 500 }}
             title="並び替え順序を変更"
           >
             <option value="position_asc">配置順 (上から下)</option>
@@ -181,25 +129,15 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           gap: 6,
         }}
       >
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+        <div className="filter-chips">
           {AVAILABLE_FORMATS.map((f) => {
             const selected = filter.formats.includes(f.value);
             return (
               <button
                 key={f.value}
                 type="button"
+                className={`filter-chip ${selected ? 'is-selected' : ''}`}
                 onClick={() => toggleFormat(f.value)}
-                style={{
-                  fontSize: 11,
-                  padding: '2px 8px',
-                  borderRadius: 12,
-                  border: '1px solid',
-                  borderColor: selected ? 'var(--color-primary)' : 'var(--color-border-input)',
-                  backgroundColor: selected ? 'var(--color-primary)' : 'var(--color-bg-surface)',
-                  color: selected ? '#ffffff' : 'var(--color-text-secondary)',
-                  cursor: 'pointer',
-                  fontWeight: selected ? 600 : 400,
-                }}
               >
                 {f.label}
               </button>
@@ -210,17 +148,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         {onClear && isFilterActive && (
           <button
             type="button"
+            className="filter-link-btn"
             onClick={onClear}
-            style={{
-              fontSize: 11,
-              color: 'var(--color-text-muted)',
-              background: 'none',
-              border: 'none',
-              padding: '2px 4px',
-              cursor: 'pointer',
-              textDecoration: 'underline',
-              whiteSpace: 'nowrap',
-            }}
             title="すべてのフィルター条件（検索・幅・高さ・形式）を解除します"
           >
             条件をクリア
@@ -230,23 +159,16 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 
       {/* Unknown Dimension Banner (MVP-11) */}
       {hasDimensionFilter && unknownDimensionsCount > 0 && (
-        <div
-          style={{
-            fontSize: 11,
-            backgroundColor: 'var(--color-warning-subtle)',
-            border: '1px solid var(--color-warning-border)',
-            padding: '4px 8px',
-            borderRadius: 4,
-            color: 'var(--color-warning-banner-text)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 8,
-          }}
-        >
+        <div className="filter-warning-banner">
           <span>寸法不明のため判定できない画像: {unknownDimensionsCount}件</span>
           <label
-            style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', whiteSpace: 'nowrap' }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
             title="寸法不明の画像を確認できます。選択するには「寸法取得」でサイズを確認してください"
           >
             <input

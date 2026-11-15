@@ -63,20 +63,7 @@ export const DownloadFooter: React.FC<DownloadFooterProps> = ({
         : '';
 
   return (
-    <footer
-      style={{
-        padding: '8px 14px',
-        backgroundColor: 'var(--color-bg-surface)',
-        borderTop: '1px solid var(--color-border)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 8,
-        fontSize: 11,
-        color: 'var(--color-text-secondary)',
-        zIndex: 10,
-      }}
-    >
+    <footer className="download-footer">
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {active > 0 && (
           <span style={{ color: 'var(--color-info-text)', fontWeight: 600 }}>
@@ -103,18 +90,9 @@ export const DownloadFooter: React.FC<DownloadFooterProps> = ({
         {cancellableIds.length > 0 && onCancelActive && (
           <button
             type="button"
+            className="panel-control"
             onClick={() => onCancelActive(cancellableIds)}
-            style={{
-              padding: '3px 8px',
-              fontSize: 11,
-              fontWeight: 500,
-              color: 'var(--color-text-secondary)',
-              backgroundColor: 'var(--color-bg-subtle)',
-              border: '1px solid var(--color-border-input)',
-              borderRadius: 4,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
+            style={{ minHeight: 24, padding: '2px 8px' }}
             title="待機中・実行中のダウンロードをすべて中止します"
           >
             中止
@@ -124,18 +102,9 @@ export const DownloadFooter: React.FC<DownloadFooterProps> = ({
         {retryableFailed > 0 && (
           <button
             type="button"
+            className="card-action-btn variant-danger"
             onClick={onRetryFailed}
-            style={{
-              padding: '3px 8px',
-              fontSize: 11,
-              fontWeight: 500,
-              color: 'var(--color-danger-text)',
-              backgroundColor: 'var(--color-danger-subtle)',
-              border: '1px solid var(--color-danger-border)',
-              borderRadius: 4,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
+            style={{ padding: '3px 8px', fontSize: 11 }}
             title="一時的なエラー等で失敗したアイテムを再試行します"
           >
             失敗を再試行 ({retryableFailed})

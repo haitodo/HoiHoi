@@ -1,4 +1,5 @@
 import type { CardSize, MediaMode } from '@shared/types';
+import { DownloadIcon } from './Icons';
 
 interface SelectionToolbarProps {
   mediaMode: MediaMode;
@@ -36,7 +37,8 @@ export function SelectionToolbar({
         onClick={onDownloadSelected}
         disabled={selectedCount === 0}
       >
-        ダウンロード ({selectedCount})
+        <DownloadIcon size={12} />
+        <span>ダウンロード ({selectedCount})</span>
       </button>
 
       {hiddenSelectedCount > 0 && (
@@ -89,7 +91,7 @@ export function SelectionOptions({
     <div className="selection-options">
       <div className="selection-options-row">
         <div className="selection-options-row" role="group" aria-label="表示サイズ">
-          <span>表示サイズ</span>
+          <span className="filter-field-label">表示サイズ</span>
           {CARD_SIZE_OPTIONS.map(({ value, label, title }) => (
             <button
               key={value}

@@ -6,6 +6,7 @@ import type {
   VideoResolutionTier,
   VideoSortOrder,
 } from '@shared/types';
+import { SearchIcon } from './Icons';
 
 interface VideoFilterBarProps {
   filter: VideoFilterState;
@@ -61,44 +62,25 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
   );
 
   return (
-    <div
-      style={{
-        padding: '8px 10px',
-        backgroundColor: 'var(--color-bg-subtle)',
-        borderBottom: '1px solid var(--color-border)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-      }}
-    >
+    <div className="filter-section">
       {/* Search Input */}
       <div>
         <input
           type="text"
+          className="filter-input"
           aria-label="動画URL・ファイル名で絞り込み"
           placeholder="動画URL・ファイル名で絞り込み..."
           value={filter.urlQuery}
           onChange={(e) => onChange({ ...filter, urlQuery: e.target.value })}
-          style={{
-            width: '100%',
-            padding: '5px 8px',
-            fontSize: 12,
-            border: '1px solid var(--color-border-input)',
-            borderRadius: 6,
-            boxSizing: 'border-box',
-            backgroundColor: 'var(--color-bg-surface)',
-            color: 'var(--color-text-primary)',
-          }}
         />
       </div>
 
       {/* Resolution, Duration & Sort Controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 95px' }}>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-            画質:
-          </span>
+      <div className="filter-row">
+        <div className="filter-field" style={{ flex: '1 1 95px' }}>
+          <span className="filter-field-label">画質:</span>
           <select
+            className="filter-select"
             aria-label="画質"
             value={filter.minResolution}
             onChange={(e) =>
@@ -107,17 +89,6 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
                 minResolution: e.target.value as VideoResolutionTier,
               })
             }
-            style={{
-              width: '100%',
-              minWidth: 0,
-              padding: '4px 6px',
-              fontSize: 11,
-              border: '1px solid var(--color-border-input)',
-              borderRadius: 4,
-              backgroundColor: 'var(--color-bg-surface)',
-              color: 'var(--color-text-primary)',
-              cursor: 'pointer',
-            }}
           >
             <option value="all">すべて</option>
             <option value="4k">4K (2160p+)</option>
@@ -126,11 +97,10 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
           </select>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 100px' }}>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-            長さ:
-          </span>
+        <div className="filter-field" style={{ flex: '1 1 100px' }}>
+          <span className="filter-field-label">長さ:</span>
           <select
+            className="filter-select"
             aria-label="長さ"
             value={filter.durationRange}
             onChange={(e) =>
@@ -139,17 +109,6 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
                 durationRange: e.target.value as VideoDurationRange,
               })
             }
-            style={{
-              width: '100%',
-              minWidth: 0,
-              padding: '4px 6px',
-              fontSize: 11,
-              border: '1px solid var(--color-border-input)',
-              borderRadius: 4,
-              backgroundColor: 'var(--color-bg-surface)',
-              color: 'var(--color-text-primary)',
-              cursor: 'pointer',
-            }}
           >
             <option value="all">すべて</option>
             <option value="short">ショート (&lt;1分)</option>
@@ -158,26 +117,14 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
           </select>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1.2 1 125px' }}>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-            並び順:
-          </span>
+        <div className="filter-field" style={{ flex: '1.2 1 125px' }}>
+          <span className="filter-field-label">並び順:</span>
           <select
+            className="filter-select"
             aria-label="並び順"
             value={sortOrder}
             onChange={(e) => onSortChange(e.target.value as VideoSortOrder)}
-            style={{
-              width: '100%',
-              minWidth: 0,
-              padding: '4px 6px',
-              fontSize: 11,
-              border: '1px solid var(--color-border-input)',
-              borderRadius: 4,
-              backgroundColor: 'var(--color-bg-surface)',
-              color: 'var(--color-text-primary)',
-              cursor: 'pointer',
-              fontWeight: 500,
-            }}
+            style={{ fontWeight: 500 }}
           >
             <option value="position_asc">配置順 (上から下)</option>
             <option value="position_desc">配置順 (下から上)</option>
@@ -202,25 +149,15 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
           gap: 6,
         }}
       >
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+        <div className="filter-chips">
           {AVAILABLE_VIDEO_FORMATS.map((f) => {
             const selected = filter.formats.includes(f.value);
             return (
               <button
                 key={f.value}
                 type="button"
+                className={`filter-chip ${selected ? 'is-selected' : ''}`}
                 onClick={() => toggleFormat(f.value)}
-                style={{
-                  fontSize: 11,
-                  padding: '2px 8px',
-                  borderRadius: 12,
-                  border: '1px solid',
-                  borderColor: selected ? 'var(--color-primary)' : 'var(--color-border-input)',
-                  backgroundColor: selected ? 'var(--color-primary)' : 'var(--color-bg-surface)',
-                  color: selected ? '#ffffff' : 'var(--color-text-secondary)',
-                  cursor: 'pointer',
-                  fontWeight: selected ? 600 : 400,
-                }}
               >
                 {f.label}
               </button>
@@ -255,16 +192,9 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
           {isFilterActive && onReset && (
             <button
               type="button"
+              className="filter-link-btn"
+              style={{ color: 'var(--color-primary-text)' }}
               onClick={onReset}
-              style={{
-                fontSize: 11,
-                color: 'var(--color-primary-text)',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: '2px 4px',
-                textDecoration: 'underline',
-              }}
             >
               リセット
             </button>
@@ -273,58 +203,26 @@ export const VideoFilterBar: React.FC<VideoFilterBarProps> = ({
       </div>
 
       {!isProbing && unprobedCount > 0 && onStartProbing && (
-        <div
-          style={{
-            fontSize: 11,
-            padding: '4px 8px',
-            borderRadius: 5,
-            backgroundColor: 'var(--color-bg-surface)',
-            border: '1px dashed var(--color-border-input)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 6,
-          }}
-        >
+        <div className="filter-probe-banner">
           <span style={{ color: 'var(--color-text-secondary)' }}>
             画質未取得の直接保存動画: {unprobedCount} 件
           </span>
           <button
             type="button"
+            className="card-action-btn variant-primary-tint"
             onClick={onStartProbing}
-            style={{
-              padding: '2px 8px',
-              fontSize: 11,
-              border: '1px solid var(--color-primary-subtle-border)',
-              borderRadius: 4,
-              backgroundColor: 'var(--color-primary-subtle)',
-              color: 'var(--color-primary-text)',
-              cursor: 'pointer',
-              fontWeight: 600,
-            }}
+            style={{ padding: '2px 8px', fontSize: 11 }}
             title="動画全体をダウンロードせず、先頭メタデータのみを1件ずつ軽量に問い合わせて解像度を取得します"
           >
-            🔍 画質を一括取得
+            <SearchIcon size={11} />
+            <span>画質を一括取得</span>
           </button>
         </div>
       )}
 
       {/* Unprobed metadata banner (Zero-Eager-Load transparency) */}
       {hasMetadataFilter && unknownMetadataCount > 0 && (
-        <div
-          style={{
-            fontSize: 11,
-            padding: '5px 8px',
-            borderRadius: 5,
-            backgroundColor: 'var(--color-warning-subtle)',
-            border: '1px solid var(--color-warning-border)',
-            color: 'var(--color-warning-banner-text)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 6,
-          }}
-        >
+        <div className="filter-warning-banner">
           <span>
             {filter.includeUnknownMetadata
               ? `再生前のため画質・長さ未取得の動画 ${unknownMetadataCount} 件も表示中`

@@ -7,10 +7,21 @@ import {
   formatByteSize,
   formatVideoDuration,
   getActiveVideoVariant,
-  getVideoResolutionTier,
   getVideoResolutionTierFromVariant,
 } from '@shared/video-utils';
 import type { HlsStreamMergeProgress } from '../utils/hls-saver';
+import {
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  ExpandIcon,
+  ExternalLinkIcon,
+  FilmIcon,
+  LayersIcon,
+  PlayIcon,
+  StopIcon,
+  TerminalIcon,
+} from './Icons';
 
 interface VideoCardProps {
   item: VideoItem;
@@ -192,40 +203,25 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
   return (
     <div
+      className={`media-card ${canSelect ? 'is-selectable' : ''} ${isSelected ? 'is-selected' : ''}`}
       onClick={handleCardClick}
       onDoubleClick={(e) => {
         e.stopPropagation();
         onOpenPreview?.();
       }}
-      style={{
-        border: `2px solid ${isSelected ? 'var(--color-primary)' : 'var(--color-border)'}`,
-        borderRadius: 8,
-        backgroundColor: 'var(--color-card-bg)',
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        boxSizing: 'border-box',
-        cursor: canSelect ? 'pointer' : 'default',
-        position: 'relative',
-        transition: 'border-color 0.15s ease',
-      }}
     >
       {/* Top-Left Selection Checkbox or Status Pill */}
       <div
+        className="card-overlay-pill"
         style={{
           position: 'absolute',
           top: 6,
           left: 6,
           zIndex: 3,
-          backgroundColor: 'var(--color-overlay-bg)',
-          border: '1px solid var(--color-overlay-border)',
-          borderRadius: 4,
           padding: '2px 5px',
           display: 'flex',
           alignItems: 'center',
           gap: 4,
-          backdropFilter: 'blur(4px)',
         }}
         onClick={(e) => {
           e.stopPropagation();
@@ -247,6 +243,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             style={{
               fontSize: 9,
               fontWeight: 700,
+              letterSpacing: '0.04em',
               color: 'var(--color-info-text)',
             }}
             title={activeVariant?.blockReason}
@@ -283,33 +280,27 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         {onOpenPreview && canPreviewInline && (
           <button
             type="button"
+            className="card-overlay-pill"
+            aria-label="拡大プレイヤーで開く"
             onClick={() => onOpenPreview()}
             style={{
-              backgroundColor: 'var(--color-overlay-bg)',
-              border: '1px solid var(--color-overlay-border)',
-              color: 'var(--color-text-primary)',
-              borderRadius: 4,
-              padding: '2px 6px',
-              fontSize: 10,
+              width: 22,
+              height: 22,
+              padding: 0,
               cursor: 'pointer',
-              backdropFilter: 'blur(4px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
             title="拡大プレイヤーで開く"
           >
-            🔍
+            <ExpandIcon size={11} />
           </button>
         )}
 
         {item.occurrenceCount > 1 && (
           <span
-            style={{
-              backgroundColor: 'rgba(0, 0, 0, 0.72)',
-              color: '#ffffff',
-              fontSize: 10,
-              padding: '1px 5px',
-              borderRadius: 8,
-              fontWeight: 500,
-            }}
+            className="card-occurrence-badge"
             title={`ページ内で ${item.occurrenceCount} 箇所に出現`}
           >
             ×{item.occurrenceCount}
@@ -322,7 +313,8 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         style={{
           width: '100%',
           height: thumbnailHeight,
-          backgroundColor: '#0f172a',
+          backgroundColor: 'var(--color-thumb-bg)',
+          borderBottom: '1px solid var(--color-border)',
           position: 'relative',
           display: 'flex',
           alignItems: 'center',
@@ -363,6 +355,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             />
             <button
               type="button"
+              className="card-overlay-pill"
               onClick={(e) => {
                 e.stopPropagation();
                 onToggleInlinePlay();
@@ -371,17 +364,17 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                 position: 'absolute',
                 top: 32,
                 right: 6,
-                backgroundColor: 'rgba(0, 0, 0, 0.75)',
-                color: '#ffffff',
-                border: '1px solid rgba(255,255,255,0.25)',
-                borderRadius: 4,
-                padding: '2px 6px',
+                padding: '3px 7px',
                 fontSize: 10,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
                 cursor: 'pointer',
               }}
               title="プレビュー再生を閉じて通信を停止"
             >
-              ⏹ 閉じる
+              <StopIcon size={9} />
+              <span>閉じる</span>
             </button>
           </div>
         ) : (
@@ -403,15 +396,15 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                 style={{
                   padding: '10px 14px',
                   textAlign: 'center',
-                  color: '#cbd5e1',
+                  color: 'var(--color-text-muted)',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
-                  gap: 4,
+                  gap: 6,
                   maxWidth: '90%',
                 }}
               >
-                <span style={{ fontSize: 22, opacity: 0.85 }}>🎬</span>
+                <FilmIcon size={24} />
                 <span
                   style={{
                     fontSize: 10,
@@ -419,7 +412,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
                     maxWidth: '100%',
-                    opacity: 0.9,
+                    color: 'var(--color-text-secondary)',
                   }}
                 >
                   {displayBasename}
@@ -431,29 +424,26 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             {canPreviewInline && (
               <button
                 type="button"
+                className="card-overlay-pill"
                 onClick={(e) => {
                   e.stopPropagation();
                   onToggleInlinePlay();
                 }}
                 style={{
                   position: 'absolute',
-                  backgroundColor: 'rgba(15, 23, 42, 0.78)',
-                  color: '#ffffff',
-                  border: '1px solid rgba(255, 255, 255, 0.35)',
-                  borderRadius: 20,
-                  padding: '5px 11px',
+                  borderRadius: 999,
+                  padding: '5px 12px',
                   fontSize: 11,
                   fontWeight: 600,
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 4,
-                  boxShadow: '0 2px 6px rgba(0, 0, 0, 0.35)',
-                  backdropFilter: 'blur(3px)',
+                  gap: 5,
                 }}
                 title="クリックした時だけ動画を読み込んでプレビュー再生します"
               >
-                ▶ プレビュー
+                <PlayIcon size={10} />
+                <span>プレビュー</span>
               </button>
             )}
 
@@ -469,13 +459,12 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               }}
             >
               <span
+                className="card-overlay-pill"
                 style={{
-                  backgroundColor: 'rgba(0, 0, 0, 0.75)',
-                  color: '#ffffff',
                   fontSize: 10,
                   fontWeight: 600,
                   padding: '1px 6px',
-                  borderRadius: 4,
+                  fontVariantNumeric: 'tabular-nums',
                 }}
               >
                 {resBadge ? `${resBadge} • ${formatText}` : formatText}
@@ -485,16 +474,18 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             {/* Bottom-Right Duration Badge */}
             {(item.durationSec || item.isLive) && (
               <span
+                className={item.isLive ? undefined : 'card-overlay-pill'}
                 style={{
                   position: 'absolute',
                   bottom: 6,
                   right: 6,
-                  backgroundColor: item.isLive ? '#dc2626' : 'rgba(0, 0, 0, 0.78)',
+                  backgroundColor: item.isLive ? 'rgba(220, 38, 38, 0.92)' : undefined,
                   color: '#ffffff',
                   fontSize: 10,
                   fontWeight: 600,
+                  fontVariantNumeric: 'tabular-nums',
                   padding: '1px 6px',
-                  borderRadius: 4,
+                  borderRadius: 5,
                 }}
               >
                 {durationText}
@@ -526,6 +517,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               gap: 4,
               color: 'var(--color-text-secondary)',
               fontWeight: 500,
+              fontVariantNumeric: 'tabular-nums',
             }}
           >
             <span>
@@ -553,13 +545,17 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             <div
               style={{
                 fontSize: 10,
-                marginTop: 4,
+                marginTop: 5,
                 padding: '3px 6px',
                 borderRadius: 4,
                 backgroundColor:
                   readiness === 'stream_manifest'
                     ? 'var(--color-primary-subtle)'
                     : 'var(--color-danger-subtle)',
+                border:
+                  readiness === 'stream_manifest'
+                    ? '1px solid var(--color-primary-subtle-border)'
+                    : '1px solid var(--color-danger-border)',
                 color:
                   readiness === 'stream_manifest'
                     ? 'var(--color-primary-text)'
@@ -575,21 +571,13 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         {item.variants.length > 1 && (
           <div onClick={(e) => e.stopPropagation()}>
             <select
+              className="card-variant-select"
               value={selectedUrl}
               onChange={(e) => {
                 setHlsMergeError(null);
                 onSelectVariant(e.target.value);
               }}
-              style={{
-                width: '100%',
-                fontSize: 10,
-                padding: '3px 5px',
-                borderRadius: 4,
-                border: '1px solid var(--color-border-input)',
-                backgroundColor: 'var(--color-bg-subtle)',
-                color: 'var(--color-text-primary)',
-                cursor: 'pointer',
-              }}
+              style={{ fontSize: 10, padding: '3px 5px' }}
               title="保存・再生する動画候補を切り替え"
             >
               {item.variants.map((v, idx) => {
@@ -627,9 +615,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               <div
                 style={{
                   width: '100%',
-                  height: 5,
-                  backgroundColor: 'var(--color-bg-subtle)',
-                  borderRadius: 3,
+                  height: 4,
+                  backgroundColor: 'var(--color-bg-app)',
+                  borderRadius: 999,
                   overflow: 'hidden',
                 }}
               >
@@ -637,7 +625,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                   style={{
                     width: `${Math.min(100, Math.round((hlsMergeProgress.completedSegments / hlsMergeProgress.totalSegments) * 100))}%`,
                     height: '100%',
-                    backgroundColor: 'var(--color-primary)',
+                    backgroundColor: 'var(--color-primary-ring)',
                     transition: 'width 0.2s ease',
                   }}
                 />
@@ -647,6 +635,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               style={{
                 fontSize: 10,
                 fontWeight: 600,
+                fontVariantNumeric: 'tabular-nums',
                 color: hlsMergeError ? 'var(--color-danger-text)' : 'var(--color-info-text)',
               }}
             >
@@ -673,9 +662,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               <div
                 style={{
                   width: '100%',
-                  height: 5,
-                  backgroundColor: 'var(--color-bg-subtle)',
-                  borderRadius: 3,
+                  height: 4,
+                  backgroundColor: 'var(--color-bg-app)',
+                  borderRadius: 999,
                   overflow: 'hidden',
                 }}
               >
@@ -683,7 +672,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                   style={{
                     width: `${progressPercent}%`,
                     height: '100%',
-                    backgroundColor: 'var(--color-primary)',
+                    backgroundColor: 'var(--color-primary-ring)',
                     transition: 'width 0.25s ease',
                   }}
                 />
@@ -693,6 +682,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               style={{
                 fontSize: 10,
                 fontWeight: 600,
+                fontVariantNumeric: 'tabular-nums',
                 color:
                   downloadState.status === 'completed'
                     ? 'var(--color-success-text)'
@@ -730,134 +720,84 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           {hlsMergeProgress !== null ? (
             <button
               type="button"
+              className="card-action-btn variant-danger"
               onClick={handleCancelHlsMerge}
-              style={{
-                flex: 1,
-                padding: '4px 8px',
-                fontSize: 11,
-                fontWeight: 600,
-                borderRadius: 5,
-                border: '1px solid var(--color-danger-border)',
-                backgroundColor: 'var(--color-danger-subtle)',
-                color: 'var(--color-danger-text)',
-                cursor: 'pointer',
-              }}
+              style={{ flex: 1, padding: '4px 8px', fontSize: 11 }}
               title="進行中のストリーム結合取得を中止します"
             >
-              ✕ 結合中止
+              <StopIcon size={10} />
+              <span>結合中止</span>
             </button>
           ) : isDownloading ? (
             <button
               type="button"
+              className="card-action-btn variant-danger"
               onClick={onCancelDownload}
-              style={{
-                flex: 1,
-                padding: '4px 8px',
-                fontSize: 11,
-                fontWeight: 600,
-                borderRadius: 5,
-                border: '1px solid var(--color-danger-border)',
-                backgroundColor: 'var(--color-danger-subtle)',
-                color: 'var(--color-danger-text)',
-                cursor: 'pointer',
-              }}
+              style={{ flex: 1, padding: '4px 8px', fontSize: 11 }}
               title="進行中のダウンロードを停止します"
             >
-              ✕ 中止
+              <StopIcon size={10} />
+              <span>中止</span>
             </button>
           ) : readiness === 'ready' ? (
             <button
               type="button"
+              className="card-action-btn variant-primary-tint"
               onClick={onDownload}
-              style={{
-                flex: 1,
-                padding: '4px 8px',
-                fontSize: 11,
-                fontWeight: 600,
-                borderRadius: 5,
-                border: 'none',
-                backgroundColor: 'var(--color-primary)',
-                color: '#ffffff',
-                cursor: 'pointer',
-              }}
+              style={{ flex: 1, padding: '4px 8px', fontSize: 11 }}
               title="この動画をダウンロードします"
             >
-              📥 保存
+              <DownloadIcon size={11} />
+              <span>保存</span>
             </button>
           ) : readiness === 'stream_manifest' ? (
             <>
               {activeVariant?.format === 'hls' && onMergeHlsStream && !item.isLive && (
                 <button
                   type="button"
+                  className="card-action-btn variant-primary-solid"
                   onClick={handleMergeHlsClick}
-                  style={{
-                    padding: '4px 7px',
-                    fontSize: 10,
-                    fontWeight: 600,
-                    borderRadius: 5,
-                    border: 'none',
-                    backgroundColor: 'var(--color-primary)',
-                    color: '#ffffff',
-                    cursor: 'pointer',
-                  }}
+                  style={{ padding: '4px 7px', fontSize: 10 }}
                   title="非暗号化VODのHLSセグメントを取得・結合して単一ファイルに保存します"
                 >
-                  📥 結合保存
+                  <DownloadIcon size={10} />
+                  <span>結合保存</span>
                 </button>
               )}
               {activeVariant?.format === 'hls' && (
                 <button
                   type="button"
+                  className="card-action-btn variant-primary-tint"
                   onClick={handleResolveHlsClick}
                   disabled={resolvingHls}
                   style={{
                     padding: '4px 7px',
                     fontSize: 10,
-                    fontWeight: 600,
-                    borderRadius: 5,
-                    border: '1px solid var(--color-primary-subtle-border)',
-                    backgroundColor: 'var(--color-primary-subtle)',
-                    color: 'var(--color-primary-text)',
                     cursor: resolvingHls ? 'wait' : 'pointer',
                   }}
                   title="クリック時のみ .m3u8 を読み取り、含まれる解像度候補を展開します"
                 >
-                  {resolvingHls ? '解析中...' : '🎞️ 画質解析'}
+                  <LayersIcon size={10} />
+                  <span>{resolvingHls ? '解析中...' : '画質解析'}</span>
                 </button>
               )}
               <button
                 type="button"
+                className={`card-action-btn ${copiedType === 'cmd' ? 'variant-success' : 'variant-subtle'}`}
                 onClick={handleCopyCliCommand}
-                style={{
-                  flex: 1,
-                  padding: '4px 7px',
-                  fontSize: 10,
-                  fontWeight: 600,
-                  borderRadius: 5,
-                  border: '1px solid var(--color-border-input)',
-                  backgroundColor: 'var(--color-bg-subtle)',
-                  color: 'var(--color-text-primary)',
-                  cursor: 'pointer',
-                }}
+                style={{ flex: 1, padding: '4px 7px', fontSize: 10 }}
                 title="yt-dlp 用の保存コマンドをクリップボードにコピーします"
               >
-                {copiedType === 'cmd' ? '✓ コマンドコピー済' : '⌨️ yt-dlp'}
+                {copiedType === 'cmd' ? <CheckIcon size={10} /> : <TerminalIcon size={10} />}
+                <span>{copiedType === 'cmd' ? 'コピー済' : 'yt-dlp'}</span>
               </button>
             </>
           ) : (
             <button
               type="button"
+              className="card-action-btn variant-subtle"
               disabled
-              style={{
-                flex: 1,
-                padding: '4px 8px',
-                fontSize: 11,
-                borderRadius: 5,
-                border: '1px solid var(--color-border)',
-                backgroundColor: 'var(--color-bg-subtle)',
-                color: 'var(--color-text-muted)',
-                cursor: 'not-allowed',
-              }}
+              style={{ flex: 1, padding: '4px 8px', fontSize: 11 }}
             >
               保存対象外
             </button>
@@ -865,36 +805,24 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
           <button
             type="button"
+            className="card-action-btn variant-subtle"
             onClick={handleOpenOriginal}
-            style={{
-              padding: '4px 7px',
-              fontSize: 10,
-              borderRadius: 5,
-              border: '1px solid var(--color-border-input)',
-              backgroundColor: 'var(--color-bg-surface)',
-              color: 'var(--color-text-secondary)',
-              cursor: 'pointer',
-            }}
+            style={{ padding: '4px 7px', fontSize: 10 }}
+            aria-label="新しいタブで動画URLを開く"
             title="新しいタブで動画URLを開く"
           >
-            ↗
+            <ExternalLinkIcon size={10} />
           </button>
 
           <button
             type="button"
+            className={`card-action-btn ${copiedType === 'url' ? 'variant-success' : 'variant-subtle'}`}
             onClick={handleCopyUrl}
-            style={{
-              padding: '4px 7px',
-              fontSize: 10,
-              borderRadius: 5,
-              border: '1px solid var(--color-border-input)',
-              backgroundColor: 'var(--color-bg-surface)',
-              color: 'var(--color-text-secondary)',
-              cursor: 'pointer',
-            }}
+            style={{ padding: '4px 7px', fontSize: 10 }}
+            aria-label="動画のURLをコピー"
             title="動画のURLをコピー"
           >
-            {copiedType === 'url' ? '✓' : '📋'}
+            {copiedType === 'url' ? <CheckIcon size={10} /> : <CopyIcon size={10} />}
           </button>
         </div>
       </div>
