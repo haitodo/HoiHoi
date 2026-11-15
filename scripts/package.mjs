@@ -45,6 +45,97 @@ function findBrowserExecutable() {
 }
 
 /**
+ * Runs a pnpm command without triggering Node's shell-arg deprecation warning.
+ */
+function runPnpm(pnpmBin, args, options = {}) {
+  if (process.platform === 'win32' && (pnpmBin === 'pnpm' || /\.(cmd|bat)$/i.test(pnpmBin))) {
+    return execFileSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', pnpmBin, ...args], options);
+  }
+  return execFileSync(pnpmBin, args, options);
+}
+
+/**
+ * Resolves a working pnpm executable, skipping broken Corepack shims left behind
+ * when Node.js is upgraded to a version without bundled Corepack (e.g. Node 25+).
+ */
+function findWorkingPnpm() {
+  const candidates = [];
+  const seen = new Set();
+  const addCandidate = (candidate) => {
+    if (!candidate) return;
+    const trimmed = candidate.trim();
+    if (!trimmed) return;
+    const key = process.platform === 'win32' ? trimmed.toLowerCase() : trimmed;
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(trimmed);
+  };
+
+  if (process.platform === 'win32') {
+    try {
+      const found = execFileSync('where.exe', ['pnpm'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      for (const line of found.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (trimmed && /\.(exe|cmd|bat|com)$/i.test(trimmed)) {
+          addCandidate(trimmed);
+        }
+      }
+    } catch {
+      // Fall through to well-known standalone pnpm locations
+    }
+
+    const extraPaths = [
+      process.env.PNPM_HOME && join(process.env.PNPM_HOME, 'pnpm.exe'),
+      process.env.PNPM_HOME && join(process.env.PNPM_HOME, 'bin', 'pnpm.exe'),
+      process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'pnpm', 'bin', 'pnpm.exe'),
+      process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'pnpm', 'pnpm.exe'),
+      process.env.APPDATA && join(process.env.APPDATA, 'npm', 'pnpm.cmd'),
+    ];
+    for (const candidate of extraPaths) {
+      if (candidate && existsSync(candidate)) {
+        addCandidate(candidate);
+      }
+    }
+    addCandidate('pnpm');
+  } else {
+    addCandidate('pnpm');
+    try {
+      const found = execFileSync('which', ['-a', 'pnpm'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      for (const line of found.split(/\r?\n/)) {
+        addCandidate(line);
+      }
+    } catch {
+      // Fall through to well-known standalone pnpm locations
+    }
+
+    const home = process.env.HOME;
+    const extraPaths = [
+      process.env.PNPM_HOME && join(process.env.PNPM_HOME, 'pnpm'),
+      home && join(home, '.local', 'share', 'pnpm', 'pnpm'),
+      home && join(home, '.pnpm', 'pnpm'),
+    ];
+    for (const candidate of extraPaths) {
+      if (candidate && existsSync(candidate)) {
+        addCandidate(candidate);
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      runPnpm(candidate, ['--version'], { stdio: 'ignore' });
+      return candidate;
+    } catch {
+      // Skip broken shims (e.g. orphaned Corepack shims after Node.js upgrade)
+    }
+  }
+
+  throw new Error(
+    '動作する pnpm が見つかりませんでした。Node.js 更新により Corepack shim が無効になっている場合は、スタンドアロン版 pnpm をインストールするか PATH を確認してください。',
+  );
+}
+
+/**
  * Formats byte size into human readable string.
  */
 function formatBytes(bytes) {
@@ -102,8 +193,14 @@ async function main() {
   const version = manifest.version || '0.1.0';
 
   // 3. Run production build
+  const pnpmBin = findWorkingPnpm();
+  const pnpmDir = dirname(pnpmBin);
+  const pathSep = process.platform === 'win32' ? ';' : ':';
+  const buildEnv = pnpmDir && pnpmDir !== '.'
+    ? { ...process.env, PATH: `${pnpmDir}${pathSep}${process.env.PATH || ''}` }
+    : process.env;
   console.log(`\n[3/5] 最新コードをビルドしています (pnpm build)...`);
-  execSync('pnpm build', { cwd: rootDir, stdio: 'inherit' });
+  runPnpm(pnpmBin, ['build'], { cwd: rootDir, stdio: 'inherit', env: buildEnv });
 
   // 4. Create release directory & packages
   console.log(`\n[4/5] 配布パッケージを生成しています...`);
