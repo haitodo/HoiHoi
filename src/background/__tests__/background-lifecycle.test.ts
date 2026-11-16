@@ -3,12 +3,12 @@ import { PORT_NAMES } from '@shared/constants';
 
 const mocks = vi.hoisted(() => ({
   store: { onEvent: vi.fn(), onCacheEvicted: vi.fn(), ensureHydrated: vi.fn(async () => {}),
-    getSession: vi.fn(() => ({ scanStatus: 'watching', scanEpoch: 1 })), setActiveTabs: vi.fn(),
-    hasPendingDownloads: vi.fn(() => false), flush: vi.fn(async () => {}), announceSnapshot: vi.fn(),
-    updatePageTitle: vi.fn(), mergeCandidateGroups: vi.fn(), removeTab: vi.fn() },
+    getSession: vi.fn(() => ({ scanStatus: 'watching', scanEpoch: 1 })), getSnapshot: vi.fn(),
+    setActiveTabs: vi.fn(), hasPendingDownloads: vi.fn(() => false), flush: vi.fn(async () => {}),
+    announceSnapshot: vi.fn(), updatePageTitle: vi.fn(), mergeCandidateGroups: vi.fn(), removeTab: vi.fn() },
   network: { setWatchedTabs: vi.fn() },
   downloads: { setProgressSubscribers: vi.fn(), init: vi.fn(async () => {}), handleDownloadDelta: vi.fn() },
-  rules: { clearIdleRulesIfPossible: vi.fn(async () => {}) },
+  rules: { clearIdleRulesIfPossible: vi.fn(async () => {}), setActiveTabContext: vi.fn(async () => {}) },
   coordinator: { stopTabScanner: vi.fn(async () => {}), handleTabNavigation: vi.fn(),
     bootstrapTabScan: vi.fn(), triggerTabRescan: vi.fn() },
 }));
@@ -25,13 +25,13 @@ function event() {
 }
 
 describe('background idle lifecycle', () => {
-  let tabs: { onUpdated: ReturnType<typeof event>; onRemoved: ReturnType<typeof event> };
+  let tabs: { onUpdated: ReturnType<typeof event>; onRemoved: ReturnType<typeof event>; get: ReturnType<typeof vi.fn> };
   let runtime: { onInstalled: ReturnType<typeof event>; onConnect: ReturnType<typeof event>;
     onMessage: ReturnType<typeof event>; sendMessage: ReturnType<typeof vi.fn> };
 
   beforeEach(async () => {
     vi.resetModules(); vi.clearAllMocks();
-    tabs = { onUpdated: event(), onRemoved: event() };
+    tabs = { onUpdated: event(), onRemoved: event(), get: vi.fn() };
     runtime = { onInstalled: event(), onConnect: event(), onMessage: event(), sendMessage: vi.fn(async () => {}) };
     vi.stubGlobal('chrome', { tabs, runtime, action: { onClicked: event() }, downloads: { onChanged: event() } });
     await import('../index');
@@ -70,5 +70,31 @@ describe('background idle lifecycle', () => {
     expect(mocks.network.setWatchedTabs).toHaveBeenLastCalledWith([10]);
     expect(mocks.coordinator.triggerTabRescan).not.toHaveBeenCalled();
     expect(mocks.coordinator.bootstrapTabScan).not.toHaveBeenCalled();
+  });
+
+  it('returns the post-await snapshot from PANEL_GET_TAB_SESSION when scanning finishes mid-request', async () => {
+    const scanningSnapshot = {
+      tabId: 10, revision: 1, scanEpoch: 1, scanStatus: 'scanning', pageUrl: 'https://example.com/album',
+      items: [], videos: [], selectedIds: [], selectedVideoIds: [], downloads: {},
+    };
+    const watchingSnapshot = { ...scanningSnapshot, revision: 3, scanStatus: 'watching' };
+    let resolveTab!: (tab: { url: string }) => void;
+    tabs.get.mockImplementationOnce(() => new Promise((resolve) => { resolveTab = resolve; }));
+    mocks.store.getSnapshot
+      .mockReturnValueOnce(scanningSnapshot)
+      .mockReturnValue(watchingSnapshot);
+
+    const response = vi.fn();
+    runtime.onMessage.emit({
+      channel: 'WIC_PANEL_TO_BG',
+      type: 'PANEL_GET_TAB_SESSION',
+      tabId: 10,
+    }, {}, response);
+
+    await vi.waitFor(() => expect(tabs.get).toHaveBeenCalledWith(10));
+    resolveTab({ url: 'https://example.com/album' });
+    await vi.waitFor(() => expect(response).toHaveBeenCalled());
+
+    expect(response).toHaveBeenCalledWith({ ok: true, data: watchingSnapshot });
   });
 });

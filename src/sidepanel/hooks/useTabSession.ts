@@ -22,16 +22,23 @@ export function useTabSession(tabId: number | null) {
   const [snapshot, setSnapshot] = useState<TabSessionSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const revisionRef = useRef<number>(0);
+  const hasSnapshotRef = useRef<boolean>(false);
   const targetTabRef = useRef(tabId);
   targetTabRef.current = tabId;
   const requestSequence = useRef(0);
   const pendingRequest = useRef<number | null>(null);
+  const pendingRefetch = useRef<number | null>(null);
 
   const fetchSnapshot = useCallback(async (targetTabId: number) => {
-    if (pendingRequest.current === targetTabId) return;
+    if (pendingRequest.current === targetTabId) {
+      pendingRefetch.current = targetTabId;
+      return;
+    }
     const sequence = ++requestSequence.current;
     pendingRequest.current = targetTabId;
+    pendingRefetch.current = null;
     setLoading(true);
+    let shouldRefetch = false;
     try {
       const msg: PanelToBackgroundMessage = {
         channel: 'WIC_PANEL_TO_BG',
@@ -40,9 +47,14 @@ export function useTabSession(tabId: number | null) {
       };
       const res = (await chrome.runtime.sendMessage(msg)) as MessageResult<TabSessionSnapshot>;
       if (res?.ok && targetTabRef.current === targetTabId && sequence === requestSequence.current) {
-        setSnapshot((previous) => previous?.tabId === targetTabId && previous.revision > res.data.revision
-          ? previous : res.data);
-        revisionRef.current = Math.max(revisionRef.current, res.data.revision);
+        if (res.data.revision < revisionRef.current) {
+          shouldRefetch = true;
+        } else {
+          hasSnapshotRef.current = true;
+          setSnapshot((previous) => previous?.tabId === targetTabId && previous.revision > res.data.revision
+            ? previous : res.data);
+          revisionRef.current = Math.max(revisionRef.current, res.data.revision);
+        }
       }
     } catch (err) {
       console.warn('[WIC] Failed to fetch tab session snapshot:', err);
@@ -50,6 +62,10 @@ export function useTabSession(tabId: number | null) {
       if (sequence === requestSequence.current) {
         pendingRequest.current = null;
         setLoading(false);
+        if ((shouldRefetch || pendingRefetch.current === targetTabId) && targetTabRef.current === targetTabId) {
+          pendingRefetch.current = null;
+          void fetchSnapshot(targetTabId);
+        }
       }
     }
   }, []);
@@ -57,8 +73,10 @@ export function useTabSession(tabId: number | null) {
   // Fetch initial snapshot whenever active tabId changes
   useEffect(() => {
     revisionRef.current = 0;
+    hasSnapshotRef.current = false;
     requestSequence.current += 1;
     pendingRequest.current = null;
+    pendingRefetch.current = null;
     setSnapshot(null);
     if (tabId === null) {
       setSnapshot(null);
@@ -78,6 +96,7 @@ export function useTabSession(tabId: number | null) {
 
       if (msg.type === 'EVENT_SESSION_REPLACED') {
         if (msg.snapshot.revision < revisionRef.current) return;
+        hasSnapshotRef.current = true;
         setSnapshot(msg.snapshot);
         revisionRef.current = msg.snapshot.revision;
         return;
@@ -105,9 +124,9 @@ export function useTabSession(tabId: number | null) {
         return;
       }
 
-      // Self-heal if any delta event was missed
+      // Self-heal if any delta event was missed or arrived before the base snapshot
       if (msg.revision <= revisionRef.current) return;
-      if (revisionRef.current > 0 && msg.revision !== revisionRef.current + 1) {
+      if (!hasSnapshotRef.current || (revisionRef.current > 0 && msg.revision !== revisionRef.current + 1)) {
         void fetchSnapshot(msg.tabId);
         return;
       }
@@ -116,7 +135,6 @@ export function useTabSession(tabId: number | null) {
 
       setSnapshot((prev) => {
         if (!prev || prev.tabId !== tabId) {
-          void fetchSnapshot(msg.tabId);
           return null;
         }
 

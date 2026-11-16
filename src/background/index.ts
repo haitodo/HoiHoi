@@ -215,16 +215,18 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
             if (snapshot.pageUrl && snapshot.scanStatus !== 'unscanned') {
               try {
                 const tab = await chrome.tabs.get(tabId);
-                if (tab.url && tab.url !== snapshot.pageUrl) {
+                const latest = sessionStore.getSnapshot(tabId);
+                if (tab.url && latest.pageUrl && tab.url !== latest.pageUrl) {
                   handleTabNavigation(tabId);
-                  snapshot = sessionStore.getSnapshot(tabId);
                 }
               } catch {}
+              snapshot = sessionStore.getSnapshot(tabId);
             }
             if (snapshot.scanStatus === 'unscanned' && !snapshot.pageUrl && tabId > 0) {
               try {
                 const tab = await chrome.tabs.get(tabId);
-                if (tab.url) {
+                snapshot = sessionStore.getSnapshot(tabId);
+                if (snapshot.scanStatus === 'unscanned' && !snapshot.pageUrl && tab.url) {
                   snapshot = { ...snapshot, pageUrl: tab.url, pageTitle: tab.title,
                     domain: new URL(tab.url).hostname };
                 }
