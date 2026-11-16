@@ -93,4 +93,27 @@ describe('scan startup', () => {
     expect(starts).toEqual([expect.objectContaining({ scanEpoch: 2 })]);
     expect(sessionStore.getSnapshot(tab.id).pageUrl).toBe(nextTab.url);
   });
+
+  it('injects immediately, times out stalled injection, and allows rescanning cleanly', async () => {
+    const { bootstrapTabScan, triggerTabRescan } = await import('../tab-coordinator');
+    const { sessionStore } = await import('../session-store');
+
+    const bootstrap = bootstrapTabScan(tab as chrome.tabs.Tab);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(executeScript).toHaveBeenCalledWith(expect.objectContaining({
+      target: { tabId: tab.id },
+      injectImmediately: true,
+    }));
+
+    // Simulate a stalled injection that never settles within 10s
+    await vi.advanceTimersByTimeAsync(10_000);
+    await bootstrap;
+    expect(sessionStore.getSnapshot(tab.id).scanStatus).toBe('error');
+
+    // Subsequent rescan must not be wedged by the timed-out pending start
+    sendToTab.mockResolvedValue({ ok: true });
+    executeScript.mockResolvedValueOnce(undefined);
+    await expect(triggerTabRescan(tab.id)).resolves.toBe(true);
+    expect(sessionStore.getSnapshot(tab.id).scanStatus).toBe('scanning');
+  });
 });

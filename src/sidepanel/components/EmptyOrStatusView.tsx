@@ -89,6 +89,24 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
         </button>
       );
     }
+  } else if (scanStatus === 'error') {
+    title = 'スキャンを開始できませんでした';
+    description =
+      statusMessage ||
+      'ページとの通信がタイムアウトまたは中断されました。「再スキャン」をお試しください。';
+    if (onRescan) {
+      action = (
+        <button
+          type="button"
+          className="panel-control panel-control-primary"
+          onClick={onRescan}
+          style={{ marginTop: 14, padding: '7px 14px', fontSize: 12 }}
+        >
+          <RefreshIcon size={12} />
+          <span>再スキャンを試行</span>
+        </button>
+      );
+    }
   } else if (isFilterEmpty) {
     title = `条件に合う${mediaNoun}がありません`;
     if (!isVideo && unknownDimensionCount > 0 && onAllowUnknownSelection) {

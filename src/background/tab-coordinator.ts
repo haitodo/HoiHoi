@@ -4,6 +4,32 @@ import { refererRuleManager } from './referer-rules';
 import { sessionStore } from './session-store';
 
 const pendingScanStarts = new Map<number, Promise<boolean>>();
+const CONTENT_PING_TIMEOUT_MS = 1_500;
+const CONTENT_INJECT_TIMEOUT_MS = 10_000;
+const CONTENT_START_TIMEOUT_MS = 5_000;
+
+class ScanStartTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ScanStartTimeoutError';
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new ScanStartTimeoutError(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 export async function bootstrapTabScan(
   tab: chrome.tabs.Tab,
@@ -113,11 +139,15 @@ async function injectAndStartScanner(
 
   const startScanner = async () => {
     if (!isCurrentScan()) return false;
-    const response = (await chrome.tabs.sendMessage(tabId, {
-      channel: 'WIC_BG_TO_CONTENT',
-      type: 'BG_START_OR_RESCAN',
-      scanEpoch,
-    })) as MessageResult | undefined;
+    const response = (await withTimeout(
+      chrome.tabs.sendMessage(tabId, {
+        channel: 'WIC_BG_TO_CONTENT',
+        type: 'BG_START_OR_RESCAN',
+        scanEpoch,
+      }) as Promise<MessageResult | undefined>,
+      CONTENT_START_TIMEOUT_MS,
+      'スキャン開始の応答がタイムアウトしました。右上の「再スキャン」をお試しください',
+    )) as MessageResult | undefined;
     if (!response?.ok) throw new Error(response?.error ?? 'Scanner did not acknowledge the start request');
     if (!isCurrentScan()) return false;
 
@@ -128,27 +158,41 @@ async function injectAndStartScanner(
 
   // 1. Try pinging existing content script first
   try {
-    const pingRes = (await chrome.tabs.sendMessage(tabId, {
-      channel: 'WIC_BG_TO_CONTENT',
-      type: 'BG_PING_CONTENT',
-    })) as MessageResult;
+    const pingRes = (await withTimeout(
+      chrome.tabs.sendMessage(tabId, {
+        channel: 'WIC_BG_TO_CONTENT',
+        type: 'BG_PING_CONTENT',
+      }) as Promise<MessageResult>,
+      CONTENT_PING_TIMEOUT_MS,
+      'Content script ping timed out',
+    )) as MessageResult;
 
     if (pingRes?.ok) return await startScanner();
   } catch {
-    // Content script not yet present or context invalidated
+    // Content script not yet present, busy, or context invalidated
   }
 
-  // 2. Inject content script via chrome.scripting
+  // 2. Inject content script via chrome.scripting (immediately, without waiting on slow third-party resources for document_idle)
   if (!isCurrentScan()) return false;
   try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: [CONTENT_SCANNER_SCRIPT_PATH],
-    });
+    await withTimeout(
+      chrome.scripting.executeScript({
+        target: { tabId },
+        files: [CONTENT_SCANNER_SCRIPT_PATH],
+        injectImmediately: true,
+      }),
+      CONTENT_INJECT_TIMEOUT_MS,
+      'ページの読み込み待ちでスキャン開始がタイムアウトしました。右上の「再スキャン」をお試しください',
+    );
 
     return await startScanner();
   } catch (err) {
     if (!isCurrentScan()) return false;
+    if (err instanceof ScanStartTimeoutError) {
+      console.warn('[WIC] Scan start timed out:', err.message);
+      sessionStore.setScanStatus(tabId, 'error', err.message);
+      return false;
+    }
     console.warn('[WIC] Injection failed (activeTab may have expired):', err);
     sessionStore.setScanStatus(
       tabId,

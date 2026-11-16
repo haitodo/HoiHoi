@@ -171,7 +171,17 @@ export function createChunkRunner(options: {
     return true;
   }
 
+  let pendingDomReadyListener: (() => void) | null = null;
+
+  function clearDomReadyListener() {
+    if (pendingDomReadyListener) {
+      document.removeEventListener('DOMContentLoaded', pendingDomReadyListener);
+      pendingDomReadyListener = null;
+    }
+  }
+
   function stopObserving() {
+    clearDomReadyListener();
     if (!isObserving) return;
     try {
       observer.disconnect();
@@ -187,8 +197,10 @@ export function createChunkRunner(options: {
 
   function ensureObserving() {
     if (isObserving || isDestroyed || !isExtensionContextValid()) return;
+    const observeRoot = document.documentElement ?? document;
+    if (!observeRoot) return;
     try {
-      observer.observe(document.documentElement, {
+      observer.observe(observeRoot, {
         childList: true,
         subtree: true,
         attributes: true,
@@ -700,6 +712,17 @@ export function createChunkRunner(options: {
 
       discoveryTasks = [discoverMetadata(), discover(document)];
       discoveryIndex = 0;
+      clearDomReadyListener();
+      if (document.readyState === 'loading') {
+        pendingDomReadyListener = () => {
+          clearDomReadyListener();
+          if (isDestroyed || currentScanEpoch !== scanEpoch) return;
+          ensureObserving();
+          discoveryTasks.push(discoverMetadata(), discover(document));
+          scheduleElements([]);
+        };
+        document.addEventListener('DOMContentLoaded', pendingDomReadyListener, { once: true });
+      }
       scheduleElements([]);
     },
     destroy,

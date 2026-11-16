@@ -244,10 +244,13 @@ export function useTabSession(tabId: number | null) {
     };
     try {
       await chrome.runtime.sendMessage(msg);
+      if (tabId !== null) {
+        void fetchSnapshot(tabId);
+      }
     } catch (err) {
       console.warn('[WIC] Failed to send PANEL_TRIGGER_RESCAN:', err);
     }
-  }, [tabId]);
+  }, [tabId, fetchSnapshot]);
 
   const sendPanelMessage = useCallback(async <T = undefined>(
     msg: PanelToBackgroundMessage,
