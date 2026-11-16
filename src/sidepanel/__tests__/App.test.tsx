@@ -375,4 +375,45 @@ describe('side panel media views', () => {
     expect(largeImg.parentElement!.style.height).toBe('');
     expect(largeImg.parentElement!.style.maxHeight).toBe('460px');
   });
+
+  it('allows selecting unknown-dimension images per page without changing saved size filters', () => {
+    const unknown1 = image(1, 'album1', null);
+    const unknown2 = image(2, 'album2', null);
+    const smallKnown = image(3, 'icon', 100, 100);
+    render({ tabId: 1, scanEpoch: 1, items: [unknown1, unknown2, smallKnown], selectedIds: [] });
+
+    const thumbnails = () => [...container.querySelectorAll<HTMLImageElement>('img[alt="Thumbnail"]')]
+      .map((img) => img.src);
+
+    expect(thumbnails()).toEqual([]);
+    expect(panel.selectAllVisible).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('寸法不明のため判定できない画像: 2件');
+
+    // Enabling per-page unknown selection from the empty view reveals & unlocks only unknown items (keeps 100x100 filtered out).
+    clickButton('このページで未確認画像を表示・選択');
+    expect(thumbnails()).toEqual([unknown1.selectedUrl, unknown2.selectedUrl]);
+    expect(panel.selectAllVisible).toHaveBeenCalledWith([unknown1.itemId, unknown2.itemId], 'image');
+    expect(localStorage.getItem('wic_filter_preferences')).toBeNull();
+
+    const checkboxes = [...container.querySelectorAll<HTMLInputElement>('input[aria-label="ダウンロード対象として選択"]')];
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes.every((cb) => !cb.disabled)).toBe(true);
+
+    panel.selectAllVisible.mockClear();
+    clickButton('表示中を全選択 (2件)');
+    expect(panel.selectAllVisible).toHaveBeenCalledWith([unknown1.itemId, unknown2.itemId], 'image');
+
+    // Switching to another tab keeps the default 500x500 safety guard intact.
+    const otherUnknown = image(4, 'other-site', null);
+    render({ tabId: 2, scanEpoch: 1, items: [otherUnknown], selectedIds: [] });
+    expect(thumbnails()).toEqual([]);
+
+    // Switching back to tab 1 preserves the per-page override for that scan.
+    render({ tabId: 1, scanEpoch: 1, items: [unknown1, unknown2, smallKnown], selectedIds: [] });
+    expect(thumbnails()).toEqual([unknown1.selectedUrl, unknown2.selectedUrl]);
+
+    // A fresh scan epoch on the same tab resets the temporary override.
+    render({ tabId: 1, scanEpoch: 2, items: [unknown1, unknown2, smallKnown], selectedIds: [] });
+    expect(thumbnails()).toEqual([]);
+  });
 });

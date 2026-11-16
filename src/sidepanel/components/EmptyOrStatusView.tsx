@@ -7,6 +7,8 @@ interface EmptyOrStatusViewProps {
   scanStatus: ScanStatus;
   statusMessage?: string;
   isFilterEmpty: boolean;
+  unknownDimensionCount?: number;
+  onAllowUnknownSelection?: () => void;
   onClearFilter?: () => void;
   onRescan?: () => void;
 }
@@ -16,6 +18,8 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
   scanStatus,
   statusMessage,
   isFilterEmpty,
+  unknownDimensionCount = 0,
+  onAllowUnknownSelection,
   onClearFilter,
   onRescan,
 }) => {
@@ -87,18 +91,44 @@ export const EmptyOrStatusView: React.FC<EmptyOrStatusViewProps> = ({
     }
   } else if (isFilterEmpty) {
     title = `条件に合う${mediaNoun}がありません`;
-    description = `設定されているフィルターや検索ワードに一致する${mediaNoun}が見つかりませんでした。`;
-    if (onClearFilter) {
+    if (!isVideo && unknownDimensionCount > 0 && onAllowUnknownSelection) {
+      description = `最小幅・最小高の条件に対し、寸法未確認の画像が ${unknownDimensionCount} 件あります。「寸法取得」で確認するか、このページのみサイズ確認なしで表示・選択できます。`;
       action = (
-        <button
-          type="button"
-          className="panel-control"
-          onClick={onClearFilter}
-          style={{ marginTop: 14, padding: '6px 14px', fontSize: 12 }}
-        >
-          フィルターをクリア
-        </button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 14 }}>
+          <button
+            type="button"
+            className="panel-control panel-control-primary"
+            onClick={onAllowUnknownSelection}
+            style={{ padding: '6px 14px', fontSize: 12 }}
+          >
+            このページで未確認画像を表示・選択
+          </button>
+          {onClearFilter && (
+            <button
+              type="button"
+              className="panel-control"
+              onClick={onClearFilter}
+              style={{ padding: '6px 14px', fontSize: 12 }}
+            >
+              フィルターをクリア
+            </button>
+          )}
+        </div>
       );
+    } else {
+      description = `設定されているフィルターや検索ワードに一致する${mediaNoun}が見つかりませんでした。`;
+      if (onClearFilter) {
+        action = (
+          <button
+            type="button"
+            className="panel-control"
+            onClick={onClearFilter}
+            style={{ marginTop: 14, padding: '6px 14px', fontSize: 12 }}
+          >
+            フィルターをクリア
+          </button>
+        );
+      }
     }
   } else if (scanStatus === 'scanning') {
     title = `${mediaNoun}を探しています...`;

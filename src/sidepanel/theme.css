@@ -963,8 +963,9 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 2px 7px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 3px 7px;
   min-height: 22px;
   border-radius: 5px;
   background-color: var(--color-warning-subtle);
@@ -980,6 +981,14 @@ select:focus-visible {
   white-space: nowrap;
 }
 
+.scan-unknown-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
 .scan-unknown-toggle {
   display: inline-flex;
   align-items: center;
@@ -991,7 +1000,12 @@ select:focus-visible {
   white-space: nowrap;
   flex-shrink: 0;
   font-weight: 500;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.scan-unknown-toggle:has(> input:disabled) {
+  opacity: 0.65;
+  cursor: default;
 }
 
 .scan-unknown-toggle:hover {
@@ -1003,9 +1017,19 @@ select:focus-visible {
   border-color: var(--color-warning-border);
 }
 
+.scan-unknown-select-toggle.is-active {
+  background-color: var(--color-primary-subtle);
+  border-color: var(--color-primary-subtle-border);
+  color: var(--color-primary-text);
+}
+
 .scan-unknown-toggle > input {
   margin: 0;
   cursor: pointer;
+}
+
+.scan-unknown-toggle > input:disabled {
+  cursor: default;
 }
 
 .scan-notice-bar.notice-completed {

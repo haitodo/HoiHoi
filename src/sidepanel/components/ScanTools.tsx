@@ -7,6 +7,8 @@ interface UnknownDimensionsControl {
   count: number;
   includeUnknown: boolean;
   onToggleIncludeUnknown: (include: boolean) => void;
+  allowUnknownSelection?: boolean;
+  onToggleAllowUnknownSelection?: (allow: boolean) => void;
 }
 
 export function ScanTools({
@@ -228,26 +230,46 @@ export function ScanTools({
         </div>
       )}
 
-      {/* 寸法不明画像の簡易確認トグル */}
+      {/* 寸法不明画像の簡易確認・一時選択許可トグル */}
       {hasUnknownDimensions && unknownDimensions && (
         <div className="scan-unknown-banner">
           <span
             className="scan-unknown-text"
-            title={`最小幅・最小高の条件に対して、寸法不明のため判定できない画像が ${unknownDimensions.count} 件あります。確認するには「確認用に表示」をONにするか「寸法取得」を実行してください`}
+            title={`最小幅・最小高の条件に対して、寸法不明のため判定できない画像が ${unknownDimensions.count} 件あります。サイズを確認するには「寸法取得」を実行し、サイズを信頼して選択する場合は「未確認も選択可」を有効にしてください`}
           >
             寸法不明のため判定できない画像: {unknownDimensions.count}件
           </span>
-          <label
-            className={`scan-unknown-toggle ${unknownDimensions.includeUnknown ? 'is-active' : ''}`}
-            title="寸法不明の画像を確認できます。選択するには「寸法取得」でサイズを確認してください"
-          >
-            <input
-              type="checkbox"
-              checked={unknownDimensions.includeUnknown}
-              onChange={(e) => unknownDimensions.onToggleIncludeUnknown(e.target.checked)}
-            />
-            <span>確認用に表示</span>
-          </label>
+          <div className="scan-unknown-actions">
+            <label
+              className={`scan-unknown-toggle ${unknownDimensions.includeUnknown || unknownDimensions.allowUnknownSelection ? 'is-active' : ''}`}
+              title={
+                unknownDimensions.allowUnknownSelection
+                  ? '「未確認も選択可」が有効なため、寸法不明の画像も表示中です'
+                  : '寸法不明の画像を確認用に一覧へ表示します（選択するには「寸法取得」または「未確認も選択可」を使用してください）'
+              }
+            >
+              <input
+                type="checkbox"
+                checked={unknownDimensions.includeUnknown || Boolean(unknownDimensions.allowUnknownSelection)}
+                disabled={Boolean(unknownDimensions.allowUnknownSelection)}
+                onChange={(e) => unknownDimensions.onToggleIncludeUnknown(e.target.checked)}
+              />
+              <span>確認用に表示</span>
+            </label>
+            {unknownDimensions.onToggleAllowUnknownSelection && (
+              <label
+                className={`scan-unknown-toggle scan-unknown-select-toggle ${unknownDimensions.allowUnknownSelection ? 'is-active' : ''}`}
+                title="このページに限り、寸法未確認の画像も表示して選択・全選択できるようにします（フィルター設定は変更されません）"
+              >
+                <input
+                  type="checkbox"
+                  checked={Boolean(unknownDimensions.allowUnknownSelection)}
+                  onChange={(e) => unknownDimensions.onToggleAllowUnknownSelection?.(e.target.checked)}
+                />
+                <span>未確認も選択可</span>
+              </label>
+            )}
+          </div>
         </div>
       )}
     </div>

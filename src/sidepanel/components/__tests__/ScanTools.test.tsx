@@ -203,4 +203,60 @@ describe('ScanTools component', () => {
     });
     expect(onToggleIncludeUnknown).toHaveBeenCalledWith(true);
   });
+
+  it('renders and toggles the per-page allow-unknown-selection control', () => {
+    const snapshot = createDummySnapshot();
+    const onToggleIncludeUnknown = vi.fn();
+    const onToggleAllowUnknownSelection = vi.fn();
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        <ScanTools
+          snapshot={snapshot}
+          enabled={true}
+          unknownDimensions={{
+            count: 3,
+            includeUnknown: false,
+            onToggleIncludeUnknown,
+            allowUnknownSelection: false,
+            onToggleAllowUnknownSelection,
+          }}
+        />,
+      );
+    });
+
+    const selectCheckbox = container.querySelector<HTMLInputElement>(
+      '.scan-unknown-select-toggle input[type="checkbox"]',
+    )!;
+    expect(selectCheckbox).not.toBeNull();
+    expect(selectCheckbox.checked).toBe(false);
+
+    act(() => {
+      selectCheckbox.click();
+    });
+    expect(onToggleAllowUnknownSelection).toHaveBeenCalledWith(true);
+
+    act(() => {
+      root.render(
+        <ScanTools
+          snapshot={snapshot}
+          enabled={true}
+          unknownDimensions={{
+            count: 3,
+            includeUnknown: false,
+            onToggleIncludeUnknown,
+            allowUnknownSelection: true,
+            onToggleAllowUnknownSelection,
+          }}
+        />,
+      );
+    });
+
+    const previewCheckbox = container.querySelector<HTMLInputElement>(
+      '.scan-unknown-toggle:not(.scan-unknown-select-toggle) input[type="checkbox"]',
+    )!;
+    expect(previewCheckbox.checked).toBe(true);
+    expect(previewCheckbox.disabled).toBe(true);
+    expect(selectCheckbox.checked).toBe(true);
+  });
 });

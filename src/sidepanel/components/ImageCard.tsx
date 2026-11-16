@@ -118,7 +118,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           e.stopPropagation();
           if (canSelect) onToggleSelect(e);
         }}
-        title={canSelect ? undefined : '「寸法取得」でサイズを確認すると選択できます'}
+        title={canSelect ? undefined : '「寸法取得」でサイズを確認するか、上部の「未確認も選択可」を有効にすると選択できます'}
       >
         <input
           type="checkbox"

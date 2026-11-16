@@ -78,22 +78,53 @@ export function App() {
   const { mediaMode, setMediaMode, image: imagePrefs, video: videoPrefs } = usePanelPreferences();
   const [optionsOpen, setOptionsOpen] = useState(false);
   const optionsId = useId();
+  const [allowedUnknownSessions, setAllowedUnknownSessions] = useState<ReadonlySet<string>>(() => new Set());
+  const sessionKey = activeTabId !== null && snapshot?.scanEpoch !== undefined && !isGlobalBlockedStatus
+    ? `${activeTabId}:${snapshot.scanEpoch}`
+    : null;
+  const allowUnknownSelection = sessionKey !== null && allowedUnknownSessions.has(sessionKey);
+  const setAllowUnknownSelectionForSession = useCallback((allow: boolean) => {
+    if (!sessionKey) return;
+    setAllowedUnknownSessions((prev) => {
+      if (allow === prev.has(sessionKey)) return prev;
+      const next = new Set(prev);
+      if (allow) {
+        if (next.size >= 20) {
+          const oldest = next.values().next().value;
+          if (oldest) next.delete(oldest);
+        }
+        next.add(sessionKey);
+      } else {
+        next.delete(sessionKey);
+      }
+      return next;
+    });
+  }, [sessionKey]);
+
   const selectedImageIds = useMemo(() => new Set(snapshot?.selectedIds), [snapshot?.selectedIds]);
   const selectedVideoIds = useMemo(() => new Set(snapshot?.selectedVideoIds), [snapshot?.selectedVideoIds]);
 
   const imageSortSelection = imagePrefs.sortOrder === 'selected_first' ? selectedImageIds : undefined;
   const videoSortSelection = videoPrefs.sortOrder === 'selected_first' ? selectedVideoIds : undefined;
   const { filteredItems, unknownDimensionIds } = useMemo(
-    () => getImageView(rawItems, imagePrefs.filter, imagePrefs.sortOrder, imageSortSelection),
-    [rawItems, imagePrefs.filter, imagePrefs.sortOrder, imageSortSelection],
+    () => getImageView(
+      rawItems,
+      imagePrefs.filter,
+      imagePrefs.sortOrder,
+      imageSortSelection,
+      { allowUnknownDimensions: allowUnknownSelection },
+    ),
+    [rawItems, imagePrefs.filter, imagePrefs.sortOrder, imageSortSelection, allowUnknownSelection],
   );
   const canSelectImage = useCallback(
-    (item: ImageItem) => !unknownDimensionIds.has(item.itemId),
-    [unknownDimensionIds],
+    (item: ImageItem) => allowUnknownSelection || !unknownDimensionIds.has(item.itemId),
+    [allowUnknownSelection, unknownDimensionIds],
   );
   const selectableImages = useMemo(
-    () => unknownDimensionIds.size > 0 ? filteredItems.filter(canSelectImage) : filteredItems,
-    [filteredItems, canSelectImage, unknownDimensionIds],
+    () => !allowUnknownSelection && unknownDimensionIds.size > 0
+      ? filteredItems.filter(canSelectImage)
+      : filteredItems,
+    [filteredItems, canSelectImage, allowUnknownSelection, unknownDimensionIds],
   );
   const { filteredVideos, unknownVideoMetadataCount } = useMemo(
     () => getVideoView(rawVideos, videoPrefs.filter, videoPrefs.sortOrder, videoSortSelection),
@@ -199,6 +230,8 @@ export function App() {
           includeUnknown: imagePrefs.filter.includeUnknownDimensions,
           onToggleIncludeUnknown: (include: boolean) =>
             imagePrefs.setFilter({ ...imagePrefs.filter, includeUnknownDimensions: include }),
+          allowUnknownSelection,
+          onToggleAllowUnknownSelection: setAllowUnknownSelectionForSession,
         }
       : undefined;
 
@@ -309,6 +342,12 @@ export function App() {
               scanStatus={scanStatus}
               statusMessage={snapshot?.statusMessage}
               isFilterEmpty={rawItems.length > 0 && filteredItems.length === 0}
+              unknownDimensionCount={hasImageDimensionFilter ? unknownDimensionIds.size : 0}
+              onAllowUnknownSelection={
+                hasImageDimensionFilter && unknownDimensionIds.size > 0
+                  ? () => setAllowUnknownSelectionForSession(true)
+                  : undefined
+              }
               onClearFilter={imagePrefs.clearFilter}
               onRescan={triggerRescan}
             />

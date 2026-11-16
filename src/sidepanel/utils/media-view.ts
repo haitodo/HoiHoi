@@ -78,12 +78,14 @@ export function getImageView(
   filter: FilterState,
   order: SortOrder,
   selectedIds?: ReadonlySet<string>,
+  options?: { allowUnknownDimensions?: boolean },
 ) {
   const query = filter.urlQuery.trim().toLowerCase();
   const minWidth = filter.minWidth ?? 0;
   const minHeight = filter.minHeight ?? 0;
   const hasDimensionFilter = minWidth > 0 || minHeight > 0;
   const hasFormatFilter = filter.formats.length > 0;
+  const allowUnknownDimensions = Boolean(options?.allowUnknownDimensions);
   const unknownDimensionIds = new Set<string>();
 
   const matched = items.filter((item) => {
@@ -98,12 +100,12 @@ export function getImageView(
     if ((width > 0 && width < minWidth) || (height > 0 && height < minHeight)) return false;
     if ((minWidth > 0 && width <= 0) || (minHeight > 0 && height <= 0)) {
       unknownDimensionIds.add(item.itemId);
-      return filter.includeUnknownDimensions;
+      return filter.includeUnknownDimensions || allowUnknownDimensions;
     }
     return true;
   });
 
-  const matchingSelection = selectedIds && unknownDimensionIds.size > 0
+  const matchingSelection = selectedIds && unknownDimensionIds.size > 0 && !allowUnknownDimensions
     ? new Set([...selectedIds].filter((id) => !unknownDimensionIds.has(id)))
     : selectedIds;
   const filteredItems = order === 'size_asc' || order === 'size_desc'
